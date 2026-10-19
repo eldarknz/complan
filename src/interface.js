@@ -1,8 +1,99 @@
 import { catalog } from './catalog.js';
+import { summarizeBillOfMaterials, billOfMaterialsToAoa } from './project.js';
+
+const $ = (selector) => document.querySelector(selector);
+
+let currentElements = [];
+
+function renderBomList(rows) {
+  const list = $('#bom-list');
+  if (!list) return;
+  if (!rows.length) {
+    list.replaceChildren();
+    list.innerHTML = '<p class="bom-empty">Пока нет добавленных элементов</p>';
+    return;
+  }
+  const table = document.createElement('table');
+  table.className = 'bom-table';
+  table.innerHTML = '<thead><tr><th>№</th><th>Наименование</th><th>Длина</th><th>Кол-во</th></tr></thead>';
+  const body = document.createElement('tbody');
+  rows.forEach((row, index) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${index + 1}</td><td>${row.name}</td><td>${row.showLength ? `${row.length} мм` : '-'}</td><td>× ${row.quantity}</td>`;
+    body.append(tr);
+  });
+  table.append(body);
+  list.replaceChildren(table);
+}
+
+export function updateBillOfMaterials(elements) {
+  currentElements = elements;
+  const rows = summarizeBillOfMaterials(elements);
+  const total = rows.reduce((sum, row) => sum + row.quantity, 0);
+  const badge = $('#bom-total');
+  if (badge) badge.textContent = String(total);
+  const download = $('#bom-download');
+  if (download) download.disabled = !rows.length;
+  if ($('#bom-modal')?.classList.contains('open')) renderBomList(rows);
+}
+
+function openBomModal() {
+  const modal = $('#bom-modal');
+  if (!modal) return;
+  renderBomList(summarizeBillOfMaterials(currentElements));
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  $('#bom-close')?.focus();
+}
+
+function closeBomModal() {
+  const modal = $('#bom-modal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+async function downloadBomExcel() {
+  const rows = summarizeBillOfMaterials(currentElements);
+  if (!rows.length) return;
+  const button = $('#bom-download');
+  if (button) button.disabled = true;
+  try {
+    const XLSX = await import('xlsx');
+    const sheet = XLSX.utils.aoa_to_sheet(billOfMaterialsToAoa(rows));
+    sheet['!cols'] = [{ wch: 5 }, { wch: 36 }, { wch: 12 }, { wch: 12 }, { wch: 22 }];
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, 'Спецификация');
+    XLSX.writeFile(book, 'complan-specifikaciya.xlsx');
+  } finally {
+    if (button) button.disabled = !summarizeBillOfMaterials(currentElements).length;
+  }
+}
 
 export function initializeInterface(onAdd) {
-  const $ = (selector) => document.querySelector(selector);
   $('#save').insertAdjacentHTML('beforebegin', '<button id="undo" class="quiet" type="button" title="Отменить — Cmd/Ctrl+Z" aria-label="Отменить действие" disabled>↶</button><button id="redo" class="quiet" type="button" title="Повторить — Cmd/Ctrl+Shift+Z" aria-label="Повторить действие" disabled>↷</button>');
+  $('#save').insertAdjacentHTML('beforebegin', '<button id="bom-open" class="quiet" type="button">Спецификация <span id="bom-total">0</span></button>');
+  document.body.insertAdjacentHTML('beforeend', `<div id="bom-modal" class="bom-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="bom-title">
+    <div class="bom-backdrop" data-bom-close></div>
+    <div class="bom-dialog">
+      <div class="bom-dialog-header">
+        <div><p class="eyebrow">ПРОЕКТ</p><h2 id="bom-title">Спецификация</h2></div>
+        <button id="bom-close" class="quiet" type="button" aria-label="Закрыть">✕</button>
+      </div>
+      <div id="bom-list" class="bom-list"><p class="bom-empty">Пока нет добавленных элементов</p></div>
+      <div class="bom-dialog-footer">
+        <button id="bom-download" class="primary" type="button" disabled>Скачать в Excel</button>
+      </div>
+    </div>
+  </div>`);
+  $('#bom-open').onclick = openBomModal;
+  $('#bom-close').onclick = closeBomModal;
+  $('#bom-modal').querySelector('[data-bom-close]').onclick = closeBomModal;
+  $('#bom-download').onclick = downloadBomExcel;
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && $('#bom-modal')?.classList.contains('open')) closeBomModal();
+  });
+
   $('.catalog h1').textContent = 'Соберите свою систему.';
   $('.category .count').textContent = catalog.length;
   $('#add').outerHTML = `<div class="catalog-filters"><input id="catalog-search" type="search" placeholder="Найти элемент…" aria-label="Поиск по библиотеке" /><div class="presets"><button data-filter="all" class="active">Все · ${catalog.length}</button>${[110, 50].map((diameter) => `<button data-filter="${diameter}">Ø${diameter} · ${catalog.filter((item) => item.diameter === diameter).length}</button>`).join('')}</div></div><div id="catalog-list"></div>`;

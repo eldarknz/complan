@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { catalog, catalogById } from '../src/catalog.js';
 import { buildElement, getPorts, connectionPose, disposeElement } from '../src/elements.js';
-import { parseProject, serializeProject } from '../src/project.js';
+import { parseProject, serializeProject, summarizeBillOfMaterials, billOfMaterialsToAoa } from '../src/project.js';
 
 test('Каталог содержит все 73 уникальных элемента, геометрия конечна', () => {
   assert.equal(catalog.length, 73);
@@ -86,6 +86,28 @@ test('Все типы, длины и трансформации сохраняю
   const project = serializeProject(elements);
   assert.deepEqual(parseProject(JSON.parse(JSON.stringify(project))), project.elements);
   elements.forEach(disposeElement);
+});
+
+test('Спецификация группирует одинаковые элементы и разделяет трубы по длине', () => {
+  const elements = [
+    { userData: { typeId: 'pipe-110', length: 1000 } },
+    { userData: { typeId: 'pipe-110', length: 1000 } },
+    { userData: { typeId: 'pipe-110', length: 2000 } },
+    { userData: { typeId: 'elbow-110-45', length: catalogById.get('elbow-110-45').length } },
+    { userData: { typeId: 'elbow-110-45', length: catalogById.get('elbow-110-45').length } },
+  ];
+  assert.deepEqual(summarizeBillOfMaterials(elements), [
+    { typeId: 'elbow-110-45', length: catalogById.get('elbow-110-45').length, quantity: 2, name: catalogById.get('elbow-110-45').name, kind: 'elbow', showLength: false },
+    { typeId: 'pipe-110', length: 1000, quantity: 2, name: catalogById.get('pipe-110').name, kind: 'pipe', showLength: true },
+    { typeId: 'pipe-110', length: 2000, quantity: 1, name: catalogById.get('pipe-110').name, kind: 'pipe', showLength: true },
+  ]);
+  assert.deepEqual(summarizeBillOfMaterials([]), []);
+  assert.deepEqual(billOfMaterialsToAoa(summarizeBillOfMaterials(elements)), [
+    ['№', 'Наименование', 'Длина, мм', 'Количество', 'Код'],
+    [1, catalogById.get('elbow-110-45').name, '', 2, 'elbow-110-45'],
+    [2, catalogById.get('pipe-110').name, 1000, 2, 'pipe-110'],
+    [3, catalogById.get('pipe-110').name, 2000, 1, 'pipe-110'],
+  ]);
 });
 
 test('Старые проекты Ø110 читаются, повреждённые данные отклоняются', () => {

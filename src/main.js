@@ -7,7 +7,7 @@ import './connections.css';
 import { catalog, catalogById } from './catalog.js';
 import { buildElement, getPorts, compatiblePorts, disposeElement } from './elements.js';
 import { parseProject, parseConnections, serializeProject } from './project.js';
-import { initializeInterface } from './interface.js';
+import { initializeInterface, updateBillOfMaterials } from './interface.js';
 import { Connections, elementPorts, findPort, poseOf, nearestConnection } from './connections.js';
 import { CommandHistory } from './history.js';
 
@@ -246,6 +246,7 @@ function createElement(typeId = 'pipe-110', length = catalogById.get(typeId).len
 
 function updateCount() {
   $('#object-count').textContent = `Элементов: ${pipes.length}`;
+  updateBillOfMaterials(pipes);
 }
 
 function updateOutline() {
@@ -349,7 +350,7 @@ function changeLength(value) {
   const replacement = buildElement(selected.userData.typeId, value);
   [...replacement.children].forEach((child) => selected.add(child));
   connections.reflow(selected);
-  updateFields(); updateConnections(); updateOutline();
+  updateFields(); updateConnections(); updateOutline(); updateCount();
   recordEdit(before);
 }
 $('#length').addEventListener('change', (event) => changeLength(event.target.valueAsNumber));

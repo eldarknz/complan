@@ -6,6 +6,45 @@ export function serializeProject(elements, connections = new Connections()) {
   return { version: 3, units: 'mm', elements: elements.map((element) => ({ typeId: element.userData.typeId, length: element.userData.length, position: element.position.toArray(), quaternion: element.quaternion.toArray() })), connections: connections.edges.map((edge) => ({ a: elements.indexOf(edge.a), ap: edge.ap, b: elements.indexOf(edge.b), bp: edge.bp })) };
 }
 
+/** Сводка размещенных элементов: имя, длина (для труб) и количество. */
+export function summarizeBillOfMaterials(elements) {
+  const counts = new Map();
+  for (const element of elements) {
+    const typeId = element.userData?.typeId ?? element.typeId;
+    const length = element.userData?.length ?? element.length;
+    const key = `${typeId}:${length}`;
+    const current = counts.get(key);
+    if (current) {
+      current.quantity += 1;
+      continue;
+    }
+    const item = catalogById.get(typeId);
+    counts.set(key, {
+      typeId,
+      length,
+      quantity: 1,
+      name: item?.name ?? typeId,
+      kind: item?.kind ?? 'unknown',
+      showLength: item?.kind === 'pipe' && !item.fixed,
+    });
+  }
+  return [...counts.values()].sort((a, b) => a.name.localeCompare(b.name, 'ru') || a.length - b.length);
+}
+
+/** Таблица спецификации для Excel: заголовок + строки. */
+export function billOfMaterialsToAoa(rows) {
+  return [
+    ['№', 'Наименование', 'Длина, мм', 'Количество', 'Код'],
+    ...rows.map((row, index) => [
+      index + 1,
+      row.name,
+      row.showLength ? row.length : '',
+      row.quantity,
+      row.typeId,
+    ]),
+  ];
+}
+
 export function parseProject(data) {
   if (!data || ![1, 2, 3].includes(data.version) || data.units !== 'mm') throw new Error('Неверный формат проекта');
   const entries = data.version === 1 ? data.pipes : data.elements;
