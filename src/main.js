@@ -5,9 +5,9 @@ import './style.css';
 import './catalog.css';
 import './connections.css';
 import { catalog, catalogById } from './catalog.js';
-import { buildElement, getPorts, compatiblePorts, disposeElement } from './elements.js';
+import { buildElement, getPorts, compatiblePorts, disposeElement, supportsPipeColor, pipeColorById, defaultPipeColor } from './elements.js';
 import { parseProject, parseConnections, serializeProject } from './project.js';
-import { initializeInterface, updateBillOfMaterials } from './interface.js';
+import { initializeInterface, updateBillOfMaterials, getCatalogColor, syncColorSwatches } from './interface.js';
 import { Connections, elementPorts, findPort, poseOf, nearestConnection } from './connections.js';
 import { CommandHistory } from './history.js';
 
@@ -25,7 +25,7 @@ initializeInterface((item, length = item.length) => {
     toast('Элемент пристыкован к выбранному свободному концу');
   } else toast(`${item.name} добавлен`);
   recordEdit(before);
-});
+}, (color) => changeColor(color));
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#f0f2ed');
 const camera = new THREE.PerspectiveCamera(38, 1, 1, 100000);
@@ -192,7 +192,7 @@ function restoreState(state) {
   select(null);
   [...pipes].forEach(removePipe);
   state.project.elements.forEach((entry, index) => {
-    const element = createElement(entry.typeId, entry.length, new THREE.Vector3().fromArray(entry.position), new THREE.Quaternion().fromArray(entry.quaternion));
+    const element = createElement(entry.typeId, entry.length, new THREE.Vector3().fromArray(entry.position), new THREE.Quaternion().fromArray(entry.quaternion), entry.color);
     element.userData.id = state.ids[index];
     if (state.paused[index]) snapPaused.add(element);
   });
@@ -232,8 +232,11 @@ function travelHistory(direction) {
 $('#undo').onclick = () => travelHistory('undo');
 $('#redo').onclick = () => travelHistory('redo');
 
-function createElement(typeId = 'pipe-110', length = catalogById.get(typeId).length, position = new THREE.Vector3(0, 100, 0), quaternion = new THREE.Quaternion()) {
-  const pipe = buildElement(typeId, length);
+function createElement(typeId = 'pipe-110', length, position = new THREE.Vector3(0, 100, 0), quaternion = new THREE.Quaternion(), color) {
+  const item = catalogById.get(typeId);
+  length ??= item.length;
+  const resolved = supportsPipeColor(item) ? (pipeColorById.has(color) ? color : getCatalogColor()) : undefined;
+  const pipe = buildElement(typeId, length, resolved);
   pipe.userData.id = nextId++;
   pipe.position.copy(position);
   pipe.quaternion.copy(quaternion);
@@ -313,6 +316,13 @@ function updateFields() {
     button.onclick = () => changeLength(length); return button;
   }));
   $('#length').value = selected.userData.length;
+  const colorable = supportsPipeColor(item);
+  $('#color-section').hidden = !colorable;
+  if (colorable) {
+    const color = selected.userData.color || defaultPipeColor;
+    $('#element-color-name').textContent = pipeColorById.get(color).name;
+    syncColorSwatches($('#element-colors'), color);
+  }
   for (const axis of ['x', 'y', 'z']) {
     $(`#position-${axis}`).value = +selected.position[axis].toFixed(1);
     $(`#rotation-${axis}`).value = +degrees(selected.rotation[axis]).toFixed(1);
@@ -340,15 +350,29 @@ for (const kind of ['position', 'rotation']) {
   }
 }
 
+function rebuildBody(element) {
+  disposeElement(element);
+  element.clear();
+  const replacement = buildElement(element.userData.typeId, element.userData.length, element.userData.color);
+  [...replacement.children].forEach((child) => element.add(child));
+}
+
+function changeColor(color) {
+  const item = selected && catalogById.get(selected.userData.typeId);
+  if (!supportsPipeColor(item) || !pipeColorById.has(color) || selected.userData.color === color) return;
+  const before = captureState();
+  selected.userData.color = color;
+  rebuildBody(selected);
+  updateFields();
+  recordEdit(before);
+}
+
 function changeLength(value) {
   if (!selected || catalogById.get(selected.userData.typeId).kind !== 'pipe' || catalogById.get(selected.userData.typeId).fixed) return;
   if (!Number.isFinite(value) || value < 150 || value > 6000) { toast('Допустимая длина: от 150 до 6000 мм'); updateFields(); return; }
   const before = captureState();
   selected.userData.length = value;
-  disposeElement(selected);
-  selected.clear();
-  const replacement = buildElement(selected.userData.typeId, value);
-  [...replacement.children].forEach((child) => selected.add(child));
+  rebuildBody(selected);
   connections.reflow(selected);
   updateFields(); updateConnections(); updateOutline(); updateCount();
   recordEdit(before);
@@ -447,7 +471,7 @@ for (const [id, angle] of [['twist-minus', -15], ['twist-plus', 15], ['twist-qua
   };
 }
 $('#snap-enabled').onchange = () => { snapCandidate = null; updatePortMarkers(); };
-$('#duplicate').onclick = () => { if (selected) createElement(selected.userData.typeId, selected.userData.length, selected.position.clone().add(new THREE.Vector3(0, 0, 180)), selected.quaternion.clone()); };
+$('#duplicate').onclick = () => { if (selected) createElement(selected.userData.typeId, selected.userData.length, selected.position.clone().add(new THREE.Vector3(0, 0, 180)), selected.quaternion.clone(), selected.userData.color); };
 function removePipe(pipe) {
   connections.remove(pipe);
   scene.remove(pipe);
@@ -534,7 +558,7 @@ $('#file').onchange = async (event) => {
     select(null);
     [...pipes].forEach(removePipe);
     nextId = 1;
-    entries.forEach((entry) => createElement(entry.typeId, entry.length, new THREE.Vector3().fromArray(entry.position), new THREE.Quaternion().fromArray(entry.quaternion).normalize()));
+    entries.forEach((entry) => createElement(entry.typeId, entry.length, new THREE.Vector3().fromArray(entry.position), new THREE.Quaternion().fromArray(entry.quaternion).normalize(), entry.color));
     connections.edges = edges.map((edge) => ({ a: pipes[edge.a], ap: edge.ap, b: pipes[edge.b], bp: edge.bp }));
     select(pipes.at(-1) || null);
     updateCount(); focus(); toast('Проект открыт');

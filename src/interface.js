@@ -1,9 +1,40 @@
 import { catalog } from './catalog.js';
+import { defaultPipeColor, pipeColorById, pipeColors } from './elements.js';
 import { summarizeBillOfMaterials, billOfMaterialsToAoa } from './project.js';
 
 const $ = (selector) => document.querySelector(selector);
 
 let currentElements = [];
+let catalogColor = defaultPipeColor;
+
+export function getCatalogColor() {
+  return catalogColor;
+}
+
+function mountSwatches(container, onPick) {
+  container.replaceChildren(...pipeColors.map((color) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.color = color.id;
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-label', color.name);
+    button.title = color.name;
+    const dot = document.createElement('i');
+    dot.style.background = color.hex;
+    button.append(dot);
+    button.onclick = () => onPick(color.id);
+    return button;
+  }));
+}
+
+export function syncColorSwatches(container, color) {
+  if (!container) return;
+  container.querySelectorAll('[data-color]').forEach((button) => {
+    const active = button.dataset.color === color;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-checked', String(active));
+  });
+}
 
 function renderBomList(rows) {
   const list = $('#bom-list');
@@ -70,7 +101,7 @@ async function downloadBomExcel() {
   }
 }
 
-export function initializeInterface(onAdd) {
+export function initializeInterface(onAdd, onRecolor) {
   $('#save').insertAdjacentHTML('beforebegin', '<button id="undo" class="quiet" type="button" title="Отменить — Cmd/Ctrl+Z" aria-label="Отменить действие" disabled>↶</button><button id="redo" class="quiet" type="button" title="Повторить — Cmd/Ctrl+Shift+Z" aria-label="Повторить действие" disabled>↷</button>');
   $('#save').insertAdjacentHTML('beforebegin', '<button id="bom-open" class="quiet" type="button">Спецификация <span id="bom-total">0</span></button>');
   document.body.insertAdjacentHTML('beforeend', `<div id="bom-modal" class="bom-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="bom-title">
@@ -101,6 +132,9 @@ export function initializeInterface(onAdd) {
   $('#viewport').insertAdjacentHTML('beforeend', '<label class="snap-toggle"><input id="snap-enabled" type="checkbox" checked /> Магнитная стыковка <span id="snap-status">до 90 мм</span></label>');
   $('.catalog-note p').textContent = 'При включённом магните новая деталь пристыкуется к выбранному свободному концу. При перетаскивании подведите совместимые концы ближе 90 мм и отпустите мышь.';
   $('.selected-heading .muted').textContent = 'Канализация · HT';
+  document.querySelector('#properties > section').insertAdjacentHTML('afterend', '<section id="color-section"><div class="section-title">Цвет <span id="element-color-name">Серый</span></div><div id="element-colors" class="color-swatches" role="radiogroup" aria-label="Цвет выбранной детали"></div></section>');
+  mountSwatches($('#element-colors'), (color) => onRecolor?.(color));
+  syncColorSwatches($('#element-colors'), defaultPipeColor);
   $('#properties').insertAdjacentHTML('afterbegin', '<div class="assembly-status"><p id="assembly-status" class="muted small"></p><button id="detach-element" type="button" hidden>Отсоединить деталь</button></div>');
   $('.assembly-status').insertAdjacentHTML('beforeend', `<div id="joint-rotation" hidden>
     <label class="field-label" for="rotation-scope">Что вращать</label><select id="rotation-scope"><option value="joint">Деталь вокруг стыка</option><option value="assembly">Всю сборку</option></select>
@@ -118,6 +152,13 @@ export function initializeInterface(onAdd) {
     <div id="occupied-controls" hidden><p class="muted small">Повернуть выбранную сторону сборки вокруг этого стыка:</p><div class="presets"><button id="twist-minus">−15°</button><button id="twist-plus">+15°</button><button id="twist-quarter">+90°</button></div><button id="disconnect" class="text-button">Разъединить стык</button></div>`);
   $('#connect').textContent = '＋ Присоединить элемент';
   $('.inspector-footer').innerHTML = 'Эскизные модели HT Ø110 / Ø50<br><span>Монтажные размеры уточняйте по каталогу производителя.</span>';
+  $('#catalog-list').insertAdjacentHTML('beforebegin', '<div class="catalog-color"><div class="catalog-color-label"><span>Цвет новых деталей</span><strong id="catalog-color-name">Серый</strong></div><div id="catalog-colors" class="color-swatches" role="radiogroup" aria-label="Цвет новых деталей"></div></div>');
+  mountSwatches($('#catalog-colors'), (color) => {
+    catalogColor = color;
+    $('#catalog-color-name').textContent = pipeColorById.get(color).name;
+    syncColorSwatches($('#catalog-colors'), color);
+  });
+  syncColorSwatches($('#catalog-colors'), catalogColor);
   let filter = 'all';
   const symbols = { pipe: '━', tee: '┳', cross: '╋', elbow: '╰', inspection: '⊕', coupling: '═', cap: '⊣', toilet: '◎', clamp: 'Ω', fire: '▣', sleeve: '▤', roof: '△', reducer: '⋙', drain: '▦', funnel: '▽', vacuum: '⊤', check: '▸' };
   function renderCatalog() {

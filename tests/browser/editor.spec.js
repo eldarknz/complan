@@ -213,6 +213,37 @@ test('Перетаскивание манипулятором примагнич
   expect(errors).toEqual([]);
 });
 
+test('Цвет новых и выбранных деталей сохраняется и отменяется', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/');
+  await page.keyboard.press('Escape');
+  await page.locator('#catalog-colors [data-color="orange"]').click();
+  await expect(page.locator('#catalog-color-name')).toHaveText('Оранжевый');
+  await page.locator('[data-type-id="tee-110-50-87"]').click();
+  await expect(page.locator('#element-color-name')).toHaveText('Оранжевый');
+  expect((await savedProject(page)).elements.at(-1).color).toBe('orange');
+  const canvas = page.locator('#viewport canvas');
+  const orangeShot = await canvas.screenshot();
+  await page.locator('#element-colors [data-color="white"]').click();
+  await page.locator('#element-colors [data-color="black"]').click();
+  await expect(page.locator('#element-color-name')).toHaveText('Черный');
+  const project = await savedProject(page);
+  expect(project.elements[0].color).toBe('gray');
+  expect(project.elements.at(-1).color).toBe('black');
+  expect(orangeShot.equals(await canvas.screenshot())).toBe(false);
+  await page.keyboard.press('Control+z');
+  expect((await savedProject(page)).elements.at(-1).color).toBe('white');
+  await page.keyboard.press('Control+z');
+  expect((await savedProject(page)).elements.at(-1).color).toBe('orange');
+  await page.locator('#duplicate').click();
+  expect((await savedProject(page)).elements.at(-1).color).toBe('orange');
+  await page.locator('[data-type-id="clamp-110"]').click();
+  await expect(page.locator('#color-section')).toBeHidden();
+  expect((await savedProject(page)).elements.at(-1).color).toBeUndefined();
+  expect(errors).toEqual([]);
+});
+
 test('Cmd/Ctrl+Z и Shift+Z отменяют связи и хранят последние 10 команд', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));

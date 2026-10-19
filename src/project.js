@@ -1,9 +1,19 @@
 import { catalogById } from './catalog.js';
 import * as THREE from 'three';
 import { Connections, findPort } from './connections.js';
+import { defaultPipeColor, pipeColorById, supportsPipeColor } from './elements.js';
 
 export function serializeProject(elements, connections = new Connections()) {
-  return { version: 3, units: 'mm', elements: elements.map((element) => ({ typeId: element.userData.typeId, length: element.userData.length, position: element.position.toArray(), quaternion: element.quaternion.toArray() })), connections: connections.edges.map((edge) => ({ a: elements.indexOf(edge.a), ap: edge.ap, b: elements.indexOf(edge.b), bp: edge.bp })) };
+  return {
+    version: 3,
+    units: 'mm',
+    elements: elements.map((element) => {
+      const record = { typeId: element.userData.typeId, length: element.userData.length, position: element.position.toArray(), quaternion: element.quaternion.toArray() };
+      if (element.userData.color) record.color = element.userData.color;
+      return record;
+    }),
+    connections: connections.edges.map((edge) => ({ a: elements.indexOf(edge.a), ap: edge.ap, b: elements.indexOf(edge.b), bp: edge.bp })),
+  };
 }
 
 /** Сводка размещенных элементов: имя, длина (для труб) и количество. */
@@ -12,18 +22,20 @@ export function summarizeBillOfMaterials(elements) {
   for (const element of elements) {
     const typeId = element.userData?.typeId ?? element.typeId;
     const length = element.userData?.length ?? element.length;
-    const key = `${typeId}:${length}`;
+    const color = element.userData?.color ?? element.color;
+    const key = `${typeId}:${length}:${color || ''}`;
     const current = counts.get(key);
     if (current) {
       current.quantity += 1;
       continue;
     }
     const item = catalogById.get(typeId);
+    const colorName = pipeColorById.get(color)?.name;
     counts.set(key, {
       typeId,
       length,
       quantity: 1,
-      name: item?.name ?? typeId,
+      name: colorName ? `${item?.name ?? typeId} · ${colorName}` : (item?.name ?? typeId),
       kind: item?.kind ?? 'unknown',
       showLength: item?.kind === 'pipe' && !item.fixed,
     });
@@ -55,6 +67,12 @@ export function parseProject(data) {
     const typeId = data.version === 1 ? 'pipe-110' : entry.typeId;
     const item = catalogById.get(typeId);
     if (!item || !Number.isFinite(entry.length) || (item.kind === 'pipe' && !item.fixed ? entry.length < 150 || entry.length > 6000 : entry.length !== item.length) || !vector(entry.position, 3, 1000000) || !vector(entry.quaternion, 4, 1) || Math.abs(Math.hypot(...entry.quaternion) - 1) > .01) throw new Error('Неверные параметры элемента');
+    if (supportsPipeColor(item)) {
+      const color = entry.color ?? defaultPipeColor;
+      if (typeof color !== 'string' || !pipeColorById.has(color)) throw new Error('Неверный цвет');
+      return { ...entry, typeId, color };
+    }
+    if (entry.color !== undefined) throw new Error('Неверный цвет');
     return { ...entry, typeId };
   });
 }

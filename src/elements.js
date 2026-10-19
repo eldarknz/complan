@@ -1,8 +1,20 @@
 import * as THREE from 'three';
 import { catalogById } from './catalog.js';
 
+export const pipeColors = [
+  { id: 'orange', name: 'Оранжевый', hex: '#e25a12' },
+  { id: 'white', name: 'Белый', hex: '#f4f5f2' },
+  { id: 'gray', name: 'Серый', hex: '#969b9e' },
+  { id: 'black', name: 'Черный', hex: '#2a2c2f' },
+];
+export const pipeColorById = new Map(pipeColors.map((color) => [color.id, color]));
+export const defaultPipeColor = 'gray';
+const colorableKinds = new Set(['pipe', 'elbow', 'tee', 'cross', 'coupling', 'reducer', 'cap', 'inspection', 'vacuum', 'check', 'drain', 'funnel']);
+export const supportsPipeColor = (item) => !!item && colorableKinds.has(item.kind);
+
 const xAxis = new THREE.Vector3(1, 0, 0);
-const plastic = new THREE.MeshStandardMaterial({ color: '#969b9e', roughness: .43, metalness: .06, side: THREE.DoubleSide });
+const plastics = new Map(pipeColors.map((color) => [color.id, new THREE.MeshStandardMaterial({ color: color.hex, roughness: .43, metalness: .06, side: THREE.DoubleSide })]));
+const plastic = plastics.get(defaultPipeColor);
 const rubber = new THREE.MeshStandardMaterial({ color: '#303734', roughness: .9 });
 const metal = new THREE.MeshStandardMaterial({ color: '#afb7b8', roughness: .3, metalness: .75 });
 const fire = new THREE.MeshStandardMaterial({ color: '#ac5344', roughness: .5, metalness: .3 });
@@ -62,14 +74,16 @@ function lathe(profile) {
   return geometry;
 }
 
-export function buildElement(typeId, length) {
+export function buildElement(typeId, length, color = defaultPipeColor) {
   const item = catalogById.get(typeId);
   if (!item) throw new Error('Неизвестный элемент');
   length ??= item.length;
   const group = new THREE.Group();
-  group.userData = { typeId, length };
+  const colorId = supportsPipeColor(item) ? (pipeColorById.has(color) ? color : defaultPipeColor) : undefined;
+  group.userData = colorId ? { typeId, length, color: colorId } : { typeId, length };
+  const body = plastics.get(colorId || defaultPipeColor);
   const d = item.diameter, r = d / 2, wall = d === 110 ? 3.2 : 2;
-  function mesh(geometry, position = v(), direction = xAxis, material = plastic) {
+  function mesh(geometry, position = v(), direction = xAxis, material = body) {
     const object = new THREE.Mesh(geometry, material);
     object.position.copy(position);
     object.quaternion.setFromUnitVectors(xAxis, direction);
@@ -78,7 +92,7 @@ export function buildElement(typeId, length) {
     group.add(object);
     return object;
   }
-  function tube(start, end, diameter = d, material = plastic) {
+  function tube(start, end, diameter = d, material = body) {
     const len = start.distanceTo(end), radius = diameter / 2, inner = radius - wall;
     return mesh(lathe([[0, radius], [len, radius], [len, inner], [0, inner], [0, radius]]), start, end.clone().sub(start).normalize(), material);
   }
@@ -86,7 +100,7 @@ export function buildElement(typeId, length) {
     const len = depth(diameter), radius = diameter / 2;
     mesh(lathe([[0, radius], [6, radius + 6], [len, radius + 6], [len, radius + .7], [6, radius + .7], [0, radius]]), position.clone().addScaledVector(direction, -len), direction);
   }
-  function disk(position, radius, thickness, direction = xAxis, material = plastic) {
+  function disk(position, radius, thickness, direction = xAxis, material = body) {
     const geometry = new THREE.CylinderGeometry(radius, radius, thickness, 48);
     geometry.rotateZ(-Math.PI / 2);
     return mesh(geometry, position, direction, material);
@@ -115,7 +129,7 @@ export function buildElement(typeId, length) {
       }
       if (item.kind === 'inspection') {
         disk(end, r + 9, 12, direction);
-        box(end.clone().add(v(0, 9)), [d * .65, 10, 12], plastic);
+        box(end.clone().add(v(0, 9)), [d * .65, 10, 12], body);
       }
       break;
     }
@@ -187,7 +201,7 @@ export function buildElement(typeId, length) {
     }
     case 'drain':
       tube(v(), v(90)); tube(v(90, 0), v(90, 65), 80);
-      box(v(90, 52), [110, 18, 110], plastic);
+      box(v(90, 52), [110, 18, 110], body);
       for (let z = -45; z <= 45; z += 15) box(v(90, 65, z), [105, 5, 7]);
       disk(v(90, 25), 35, 5, v(0, 1), rubber);
       break;
@@ -204,7 +218,7 @@ export function buildElement(typeId, length) {
     case 'check':
       tube(v(), v(length)); socket(v(length), v(1));
       tube(v(length * .2), v(length * .75), d * 1.5);
-      box(v(length * .5, r * 1.6), [d * 1.4, 12, d], plastic);
+      box(v(length * .5, r * 1.6), [d * 1.4, 12, d], body);
       box(v(length * .5, r * 1.6 + 12), [30, 12, 12], fire);
       break;
   }

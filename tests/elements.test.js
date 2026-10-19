@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { catalog, catalogById } from '../src/catalog.js';
-import { buildElement, getPorts, connectionPose, disposeElement } from '../src/elements.js';
+import { buildElement, getPorts, connectionPose, disposeElement, pipeColors } from '../src/elements.js';
 import { parseProject, serializeProject, summarizeBillOfMaterials, billOfMaterialsToAoa } from '../src/project.js';
 
 test('Каталог содержит все 73 уникальных элемента, геометрия конечна', () => {
@@ -108,6 +108,46 @@ test('Спецификация группирует одинаковые эле�
     [2, catalogById.get('pipe-110').name, 1000, 2, 'pipe-110'],
     [3, catalogById.get('pipe-110').name, 2000, 1, 'pipe-110'],
   ]);
+});
+
+test('Трубы и фитинги окрашиваются, монтажные элементы нет', () => {
+  const orange = pipeColors.find((color) => color.id === 'orange');
+  const tee = buildElement('tee-110-50-87', undefined, 'orange');
+  const pipe = buildElement('pipe-50', 500, 'orange');
+  assert.equal(tee.userData.color, 'orange');
+  assert.equal(pipe.children[0].material, tee.children[0].material);
+  assert.equal(pipe.children[0].material.color.getHexString(), orange.hex.slice(1));
+  for (const color of pipeColors) {
+    const element = buildElement('elbow-110-45', undefined, color.id);
+    assert.equal(element.userData.color, color.id);
+    assert.equal(element.children[0].material.color.getHexString(), color.hex.slice(1));
+    disposeElement(element);
+  }
+  const clamp = buildElement('clamp-110', undefined, 'black');
+  const toilet = buildElement('toilet-110', undefined, 'white');
+  assert.equal(clamp.userData.color, undefined);
+  assert.equal(toilet.userData.color, undefined);
+  const coupling = buildElement('htam-110', undefined, 'black');
+  const materials = new Set();
+  coupling.traverse((object) => { if (object.isMesh) materials.add(object.material.color.getHexString()); });
+  assert.ok(materials.has(pipeColors.find((color) => color.id === 'black').hex.slice(1)));
+  assert.ok(materials.size > 1);
+  disposeElement(tee); disposeElement(pipe); disposeElement(clamp); disposeElement(toilet); disposeElement(coupling);
+  const elbow = catalogById.get('elbow-110-45');
+  const legacy = { typeId: elbow.id, length: elbow.length, position: [0, 0, 0], quaternion: [0, 0, 0, 1] };
+  assert.equal(parseProject({ version: 3, units: 'mm', elements: [legacy] })[0].color, 'gray');
+  assert.throws(() => parseProject({ version: 3, units: 'mm', elements: [{ ...legacy, typeId: 'pipe-110', length: 1000, color: 'red' }] }));
+  assert.throws(() => parseProject({ version: 3, units: 'mm', elements: [{ typeId: 'clamp-110', length: catalogById.get('clamp-110').length, position: [0, 0, 0], quaternion: [0, 0, 0, 1], color: 'gray' }] }));
+});
+
+test('Спецификация разделяет одинаковые детали по цвету', () => {
+  const name = catalogById.get('pipe-110').name;
+  const rows = summarizeBillOfMaterials([
+    { userData: { typeId: 'pipe-110', length: 1000, color: 'orange' } },
+    { userData: { typeId: 'pipe-110', length: 1000, color: 'gray' } },
+    { userData: { typeId: 'pipe-110', length: 1000, color: 'orange' } },
+  ]);
+  assert.deepEqual(rows.map((row) => [row.name, row.quantity]), [[`${name} · Оранжевый`, 2], [`${name} · Серый`, 1]]);
 });
 
 test('Старые проекты Ø110 читаются, повреждённые данные отклоняются', () => {
