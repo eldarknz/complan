@@ -23,7 +23,7 @@ npm install
 npm run dev
 ```
 
-Откройте адрес, который выведет Vite (обычно http://localhost:5173).
+Откройте адрес, который выведет Vite (обычно http://localhost:5173). Опубликованная версия: https://eldarknz.github.io/complan/ . Она обновляется при каждом push в main.
 
 ```sh
 npm run build
