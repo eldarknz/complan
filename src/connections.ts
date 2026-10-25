@@ -2,11 +2,19 @@ import * as THREE from 'three';
 import { catalogById } from './catalog.js';
 import { getPorts, compatiblePorts, connectionPose } from './elements.js';
 
-export const elementPorts = (element) => getPorts(catalogById.get(element.userData.typeId), element.userData.length);
-export const findPort = (element, id) => elementPorts(element).find((port) => port.id === id);
-export const poseOf = (element) => ({ position: element.position.clone(), quaternion: element.quaternion.clone() });
+export interface ConnectionEdge {
+  a: THREE.Object3D;
+  ap: string;
+  b: THREE.Object3D;
+  bp: string;
+}
+export interface Pose { position: THREE.Vector3; quaternion: THREE.Quaternion }
 
-export function nearestConnection(moving, elements, graph, threshold = 90) {
+export const elementPorts = (element: THREE.Object3D) => getPorts(catalogById.get(element.userData.typeId), element.userData.length);
+export const findPort = (element: THREE.Object3D, id: string) => elementPorts(element).find((port) => port.id === id);
+export const poseOf = (element: THREE.Object3D): Pose => ({ position: element.position.clone(), quaternion: element.quaternion.clone() });
+
+export function nearestConnection(moving: THREE.Object3D, elements: THREE.Object3D[], graph: Connections, threshold = 90) {
   const assembly = graph.component(moving);
   let best = null;
   for (const member of assembly) {
@@ -30,13 +38,13 @@ export function nearestConnection(moving, elements, graph, threshold = 90) {
 }
 
 export class Connections {
-  edges = [];
+  edges: ConnectionEdge[] = [];
 
-  at(element, portId) {
+  at(element: THREE.Object3D, portId: string) {
     return this.edges.find((edge) => (edge.a === element && edge.ap === portId) || (edge.b === element && edge.bp === portId));
   }
 
-  component(element, excludedEdge = null) {
+  component(element: THREE.Object3D, excludedEdge: ConnectionEdge | null = null) {
     const result = new Set([element]);
     for (const current of result) {
       for (const edge of this.edges) {
@@ -48,11 +56,11 @@ export class Connections {
     return result;
   }
 
-  canJoin(a, ap, b, bp) {
+  canJoin(a: THREE.Object3D, ap: string, b: THREE.Object3D, bp: string) {
     return a !== b && !this.at(a, ap) && !this.at(b, bp) && !this.component(a).has(b) && compatiblePorts(findPort(a, ap), findPort(b, bp));
   }
 
-  moveWith(element, previous, members = this.component(element)) {
+  moveWith(element: THREE.Object3D, previous: Pose, members = this.component(element)) {
     const rotation = element.quaternion.clone().multiply(previous.quaternion.clone().invert());
     for (const other of members) {
       if (other === element) continue;
@@ -61,7 +69,7 @@ export class Connections {
     }
   }
 
-  join(a, ap, b, bp, roll = 0) {
+  join(a: THREE.Object3D, ap: string, b: THREE.Object3D, bp: string, roll = 0) {
     if (!this.canJoin(a, ap, b, bp)) throw new Error('Точки заняты, несовместимы или уже принадлежат одной сборке');
     const pose = connectionPose(a, findPort(a, ap), catalogById.get(b.userData.typeId), b.userData.length, bp, roll);
     if (!pose) throw new Error('Неверные параметры стыковки');
@@ -73,16 +81,16 @@ export class Connections {
     return pose;
   }
 
-  disconnect(element, portId) {
+  disconnect(element: THREE.Object3D, portId: string) {
     const edge = this.at(element, portId);
     if (edge) this.edges.splice(this.edges.indexOf(edge), 1);
   }
 
-  remove(element) {
+  remove(element: THREE.Object3D) {
     this.edges = this.edges.filter((edge) => edge.a !== element && edge.b !== element);
   }
 
-  reflow(root) {
+  reflow(root: THREE.Object3D) {
     const visited = new Set([root]);
     const queue = [root];
     for (const current of queue) {
@@ -101,7 +109,7 @@ export class Connections {
     }
   }
 
-  twist(element, portId, degrees) {
+  twist(element: THREE.Object3D, portId: string, degrees: number) {
     const edge = this.at(element, portId);
     if (!edge || !Number.isFinite(degrees)) return false;
     const port = findPort(element, portId);

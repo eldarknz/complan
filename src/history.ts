@@ -1,11 +1,14 @@
-export class CommandHistory {
+export class CommandHistory<T extends { project: unknown } = { project: unknown }> {
+  limit: number;
+  past: { before: T; after: T }[];
+  future: { before: T; after: T }[];
   constructor(limit = 10) {
     this.limit = limit;
     this.past = [];
     this.future = [];
   }
 
-  record(before, after) {
+  record(before: T, after: T) {
     if (JSON.stringify(before.project) === JSON.stringify(after.project)) return false;
     this.past.push(structuredClone({ before, after }));
     if (this.past.length > this.limit) this.past.shift();
