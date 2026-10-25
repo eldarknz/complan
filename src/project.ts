@@ -3,12 +3,31 @@ import * as THREE from 'three';
 import { Connections, findPort } from './connections.js';
 import { defaultPipeColor, pipeColorById, supportsPipeColor } from './elements.js';
 
-export function serializeProject(elements, connections = new Connections()) {
+export interface ProjectElement {
+  typeId: string;
+  length: number;
+  position: number[];
+  quaternion: number[];
+  color?: string;
+}
+
+export interface BillRow {
+  typeId: string;
+  length: number;
+  quantity: number;
+  name: string;
+  kind: string;
+  showLength: boolean;
+}
+
+type BillElement = { userData?: { typeId?: string; length?: number; color?: string }; typeId?: string; length?: number; color?: string };
+
+export function serializeProject(elements: THREE.Object3D[], connections = new Connections()) {
   return {
     version: 3,
     units: 'mm',
     elements: elements.map((element) => {
-      const record = { typeId: element.userData.typeId, length: element.userData.length, position: element.position.toArray(), quaternion: element.quaternion.toArray() };
+      const record: ProjectElement = { typeId: element.userData.typeId, length: element.userData.length, position: element.position.toArray(), quaternion: element.quaternion.toArray() };
       if (element.userData.color) record.color = element.userData.color;
       return record;
     }),
@@ -17,8 +36,8 @@ export function serializeProject(elements, connections = new Connections()) {
 }
 
 /** Сводка размещенных элементов: имя, длина (для труб) и количество. */
-export function summarizeBillOfMaterials(elements) {
-  const counts = new Map();
+export function summarizeBillOfMaterials(elements: BillElement[]): BillRow[] {
+  const counts = new Map<string, BillRow>();
   for (const element of elements) {
     const typeId = element.userData?.typeId ?? element.typeId;
     const length = element.userData?.length ?? element.length;
@@ -44,7 +63,7 @@ export function summarizeBillOfMaterials(elements) {
 }
 
 /** Таблица спецификации для Excel: заголовок + строки. */
-export function billOfMaterialsToAoa(rows) {
+export function billOfMaterialsToAoa(rows: BillRow[]) {
   return [
     ['№', 'Наименование', 'Длина, мм', 'Количество', 'Код'],
     ...rows.map((row, index) => [
@@ -57,27 +76,33 @@ export function billOfMaterialsToAoa(rows) {
   ];
 }
 
-export function parseProject(data) {
-  if (!data || ![1, 2, 3].includes(data.version) || data.units !== 'mm') throw new Error('Неверный формат проекта');
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+export function parseProject(data: unknown): ProjectElement[] {
+  if (!isRecord(data) || ![1, 2, 3].includes(Number(data.version)) || typeof data.version !== 'number' || data.units !== 'mm') throw new Error('Неверный формат проекта');
   const entries = data.version === 1 ? data.pipes : data.elements;
   if (!Array.isArray(entries) || entries.length > 500) throw new Error('Неверный список элементов');
-  const vector = (value, size, max) => Array.isArray(value) && value.length === size && value.every((n) => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= max);
+  const vector = (value: unknown, size: number, max: number): value is number[] => Array.isArray(value) && value.length === size && value.every((n) => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= max);
   return entries.map((entry) => {
-    if (!entry || typeof entry !== 'object') throw new Error('Неверный элемент');
+    if (!isRecord(entry)) throw new Error('Неверный элемент');
     const typeId = data.version === 1 ? 'pipe-110' : entry.typeId;
-    const item = catalogById.get(typeId);
-    if (!item || !Number.isFinite(entry.length) || (item.kind === 'pipe' && !item.fixed ? entry.length < 150 || entry.length > 6000 : entry.length !== item.length) || !vector(entry.position, 3, 1000000) || !vector(entry.quaternion, 4, 1) || Math.abs(Math.hypot(...entry.quaternion) - 1) > .01) throw new Error('Неверные параметры элемента');
+    const item = typeof typeId === 'string' ? catalogById.get(typeId) : undefined;
+    if (!item || typeof entry.length !== 'number' || !Number.isFinite(entry.length) || (item.kind === 'pipe' && !item.fixed ? entry.length < 150 || entry.length > 6000 : entry.length !== item.length) || !vector(entry.position, 3, 1000000) || !vector(entry.quaternion, 4, 1) || Math.abs(Math.hypot(...entry.quaternion) - 1) > .01) throw new Error('Неверные параметры элемента');
+    const parsed: ProjectElement = { typeId: item.id, length: entry.length, position: entry.position, quaternion: entry.quaternion };
     if (supportsPipeColor(item)) {
       const color = entry.color ?? defaultPipeColor;
       if (typeof color !== 'string' || !pipeColorById.has(color)) throw new Error('Неверный цвет');
-      return { ...entry, typeId, color };
+      return { ...parsed, color };
     }
     if (entry.color !== undefined) throw new Error('Неверный цвет');
-    return { ...entry, typeId };
+    return parsed;
   });
 }
 
-export function parseConnections(data, entries) {
+export function parseConnections(data: unknown, entries: ProjectElement[]) {
+  if (!isRecord(data)) throw new Error('Неверный формат проекта');
   if (data.version !== 3) return [];
   if (!Array.isArray(data.connections) || data.connections.length > entries.length) throw new Error('Неверный список соединений');
   const elements = entries.map((entry) => {
@@ -89,7 +114,7 @@ export function parseConnections(data, entries) {
   });
   const graph = new Connections();
   return data.connections.map((edge) => {
-    if (!edge || !Number.isInteger(edge.a) || !Number.isInteger(edge.b) || !elements[edge.a] || !elements[edge.b]) throw new Error('Неизвестная деталь в соединении');
+    if (!isRecord(edge) || typeof edge.a !== 'number' || typeof edge.b !== 'number' || typeof edge.ap !== 'string' || typeof edge.bp !== 'string' || !Number.isInteger(edge.a) || !Number.isInteger(edge.b) || !elements[edge.a] || !elements[edge.b]) throw new Error('Неизвестная деталь в соединении');
     const a = elements[edge.a], b = elements[edge.b];
     if (!graph.canJoin(a, edge.ap, b, edge.bp)) throw new Error('Недопустимое соединение');
     const ap = findPort(a, edge.ap), bp = findPort(b, edge.bp);

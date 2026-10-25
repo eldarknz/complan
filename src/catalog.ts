@@ -1,5 +1,26 @@
-export const catalog = [];
-function add(id, name, kind, diameter, options = {}) {
+export interface CatalogItem {
+  id: string;
+  name: string;
+  kind: string;
+  diameter: number;
+  length: number;
+  description: string;
+  lengths?: number[];
+  branch?: number;
+  angle?: number;
+  outlet?: number;
+  accessory?: boolean;
+  plain?: boolean;
+  cuff?: boolean;
+  fixed?: boolean;
+  socketDepth?: number;
+  plastic?: boolean;
+  twoPlane?: boolean;
+  eccentric?: boolean;
+  internal?: boolean;
+}
+export const catalog: CatalogItem[] = [];
+function add(id: string, name: string, kind: string, diameter: number, options: Partial<CatalogItem> = {}) {
   catalog.push({ id, name, kind, diameter, length: diameter * 2.5, description: '', ...options });
 }
 add('pipe-110', 'Труба HT Ø110', 'pipe', 110, { length: 1000 });
@@ -39,7 +60,7 @@ for (const diameter of [50, 110]) {
   Object.assign(catalog.find((item) => item.id === `coupling-${diameter}`), { name: `Муфта HTU Ø${diameter}`, description: 'Надвижная, ремонтная' });
   Object.assign(catalog.find((item) => item.id === `cap-${diameter}`), { name: `Заглушка HTM Ø${diameter}` });
   Object.assign(catalog.find((item) => item.id === `clamp-${diameter}`), { name: `Металлический хомут Ø${diameter}`, description: 'С резиновой вставкой' });
-  for (const [code, description, factor] of [['HTMM', 'Двойная, двухраструбная', 1.8], ['HTAM', 'Насадная с уплотнительной манжетой', 1.6]]) {
+  for (const [code, description, factor] of [['HTMM', 'Двойная, двухраструбная', 1.8], ['HTAM', 'Насадная с уплотнительной манжетой', 1.6]] as const) {
     add(`${code.toLowerCase()}-${diameter}`, `Муфта ${code} Ø${diameter}`, 'coupling', diameter, { length: diameter * factor, description, cuff: code === 'HTAM' });
   }
   add(`htl-${diameter}`, `Муфта HTL Ø${diameter}`, 'pipe', diameter, { length: diameter * 3, fixed: true, socketDepth: diameter * 1.4, description: 'Компенсационный патрубок · длинный раструб' });

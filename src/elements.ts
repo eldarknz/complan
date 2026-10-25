@@ -1,5 +1,15 @@
 import * as THREE from 'three';
-import { catalogById } from './catalog.js';
+import { catalogById, type CatalogItem } from './catalog.js';
+
+export interface Port {
+  id: string;
+  name: string;
+  diameter: number;
+  position: THREE.Vector3;
+  direction: THREE.Vector3;
+  socket: boolean;
+  depth: number;
+}
 
 export const pipeColors = [
   { id: 'orange', name: 'Оранжевый', hex: '#e25a12' },
@@ -10,7 +20,7 @@ export const pipeColors = [
 export const pipeColorById = new Map(pipeColors.map((color) => [color.id, color]));
 export const defaultPipeColor = 'gray';
 const colorableKinds = new Set(['pipe', 'elbow', 'tee', 'cross', 'coupling', 'reducer', 'cap', 'inspection', 'vacuum', 'check', 'drain', 'funnel']);
-export const supportsPipeColor = (item) => !!item && colorableKinds.has(item.kind);
+export const supportsPipeColor = (item: CatalogItem | null | undefined) => !!item && colorableKinds.has(item.kind);
 
 const xAxis = new THREE.Vector3(1, 0, 0);
 const plastics = new Map(pipeColors.map((color) => [color.id, new THREE.MeshStandardMaterial({ color: color.hex, roughness: .43, metalness: .06, side: THREE.DoubleSide })]));
@@ -19,10 +29,10 @@ const rubber = new THREE.MeshStandardMaterial({ color: '#303734', roughness: .9 
 const metal = new THREE.MeshStandardMaterial({ color: '#afb7b8', roughness: .3, metalness: .75 });
 const fire = new THREE.MeshStandardMaterial({ color: '#ac5344', roughness: .5, metalness: .3 });
 const v = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
-const depth = (diameter) => diameter === 110 ? 60 : 30;
-const port = (id, name, diameter, position, direction, socket = true) => ({ id, name, diameter, position, direction, socket, depth: socket ? depth(diameter) : 0 });
+const depth = (diameter: number) => diameter === 110 ? 60 : 30;
+const port = (id: string, name: string, diameter: number, position: THREE.Vector3, direction: THREE.Vector3, socket = true): Port => ({ id, name, diameter, position, direction, socket, depth: socket ? depth(diameter) : 0 });
 
-export function getPorts(item, length = item.length) {
+export function getPorts(item: CatalogItem, length = item.length): Port[] {
   if (item.accessory) return [];
   const input = port('in', 'Гладкий конец', item.diameter, v(), v(-1), false);
   if (item.kind === 'coupling') { input.socket = true; input.depth = depth(item.diameter); input.name = 'Раструб A'; }
@@ -52,11 +62,11 @@ export function getPorts(item, length = item.length) {
   return ports;
 }
 
-export function compatiblePorts(a, b) {
+export function compatiblePorts(a: Port | undefined, b: Port | undefined) {
   return !!a && !!b && a.diameter === b.diameter && a.socket !== b.socket;
 }
 
-export function connectionPose(source, sourcePort, targetItem, targetLength = targetItem.length, targetPortId = 'in', roll = 0) {
+export function connectionPose(source: THREE.Object3D, sourcePort: Port, targetItem: CatalogItem, targetLength = targetItem.length, targetPortId = 'in', roll = 0) {
   const input = getPorts(targetItem, targetLength).find((port) => port.id === targetPortId);
   if (!compatiblePorts(sourcePort, input) || !Number.isFinite(roll)) return null;
   const direction = sourcePort.direction.clone().applyQuaternion(source.quaternion);
@@ -68,13 +78,13 @@ export function connectionPose(source, sourcePort, targetItem, targetLength = ta
   return { position, quaternion, insertion };
 }
 
-function lathe(profile) {
+function lathe(profile: number[][]) {
   const geometry = new THREE.LatheGeometry(profile.map(([x, radius]) => new THREE.Vector2(radius, x)), 48);
   geometry.rotateZ(-Math.PI / 2);
   return geometry;
 }
 
-export function buildElement(typeId, length, color = defaultPipeColor) {
+export function buildElement(typeId: string, length?: number, color = defaultPipeColor) {
   const item = catalogById.get(typeId);
   if (!item) throw new Error('Неизвестный элемент');
   length ??= item.length;
@@ -83,7 +93,7 @@ export function buildElement(typeId, length, color = defaultPipeColor) {
   group.userData = colorId ? { typeId, length, color: colorId } : { typeId, length };
   const body = plastics.get(colorId || defaultPipeColor);
   const d = item.diameter, r = d / 2, wall = d === 110 ? 3.2 : 2;
-  function mesh(geometry, position = v(), direction = xAxis, material = body) {
+  function mesh(geometry: THREE.BufferGeometry, position = v(), direction = xAxis, material = body) {
     const object = new THREE.Mesh(geometry, material);
     object.position.copy(position);
     object.quaternion.setFromUnitVectors(xAxis, direction);
@@ -92,20 +102,20 @@ export function buildElement(typeId, length, color = defaultPipeColor) {
     group.add(object);
     return object;
   }
-  function tube(start, end, diameter = d, material = body) {
+  function tube(start: THREE.Vector3, end: THREE.Vector3, diameter = d, material = body) {
     const len = start.distanceTo(end), radius = diameter / 2, inner = radius - wall;
     return mesh(lathe([[0, radius], [len, radius], [len, inner], [0, inner], [0, radius]]), start, end.clone().sub(start).normalize(), material);
   }
-  function socket(position, direction, diameter = d) {
+  function socket(position: THREE.Vector3, direction: THREE.Vector3, diameter = d) {
     const len = depth(diameter), radius = diameter / 2;
     mesh(lathe([[0, radius], [6, radius + 6], [len, radius + 6], [len, radius + .7], [6, radius + .7], [0, radius]]), position.clone().addScaledVector(direction, -len), direction);
   }
-  function disk(position, radius, thickness, direction = xAxis, material = body) {
+  function disk(position: THREE.Vector3, radius: number, thickness: number, direction = xAxis, material = body) {
     const geometry = new THREE.CylinderGeometry(radius, radius, thickness, 48);
     geometry.rotateZ(-Math.PI / 2);
     return mesh(geometry, position, direction, material);
   }
-  function box(position, size, material = metal) { return mesh(new THREE.BoxGeometry(...size), position, xAxis, material); }
+  function box(position: THREE.Vector3, size: [number, number, number], material = metal) { return mesh(new THREE.BoxGeometry(...size), position, xAxis, material); }
   const ports = getPorts(item, length);
   switch (item.kind) {
     case 'pipe': {
@@ -135,10 +145,11 @@ export function buildElement(typeId, length, color = defaultPipeColor) {
     }
     case 'elbow': {
       const angle = THREE.MathUtils.degToRad(item.angle), lead = d * .7;
-      const path = new THREE.CurvePath();
+      const path = new THREE.CurvePath<THREE.Vector3>();
       path.add(new THREE.LineCurve3(v(), v(lead)));
-      class Arc extends THREE.Curve {
-        getPoint(t, target = v()) { return target.set(lead + d * Math.sin(t * angle), d * (1 - Math.cos(t * angle)), 0); }
+      class Arc extends THREE.Curve<THREE.Vector3> {
+        constructor() { super(); }
+        getPoint(t: number, target = v()) { return target.set(lead + d * Math.sin(t * angle), d * (1 - Math.cos(t * angle)), 0); }
       }
       const arc = new Arc();
       path.add(arc);
@@ -225,6 +236,6 @@ export function buildElement(typeId, length, color = defaultPipeColor) {
   return group;
 }
 
-export function disposeElement(group) {
-  group.traverse((object) => { if (object.isMesh) object.geometry.dispose(); });
+export function disposeElement(group: THREE.Object3D) {
+  group.traverse((object) => { if (object instanceof THREE.Mesh) object.geometry.dispose(); });
 }

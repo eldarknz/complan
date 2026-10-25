@@ -1,0 +1,41 @@
+import { expect, test } from '@playwright/test';
+
+test('React StrictMode оставляет один редактор, MobX обновляет каталог и спецификацию', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/');
+  await expect(page.locator('#viewport canvas')).toHaveCount(1);
+  await expect(page.locator('#position-fields input')).toHaveCount(3);
+  await expect(page.locator('#rotation-fields input')).toHaveCount(3);
+  await expect(page.locator('#object-count')).toHaveText('Элементов: 1');
+  await page.locator('#element-colors [data-color="orange"]').click();
+  await page.locator('#bom-open').click();
+  await expect(page.locator('#bom-list')).toContainText('Оранжевый');
+  await expect(page.locator('#bom-close')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#bom-modal')).not.toHaveClass(/open/);
+  await expect(page.locator('#bom-open')).toBeFocused();
+  await expect(page.locator('#properties')).toBeVisible();
+  await page.locator('#undo').click();
+  await page.locator('#bom-open').click();
+  await expect(page.locator('#bom-list')).toContainText('Серый');
+  await page.locator('#bom-close').click();
+
+  await page.locator('#catalog-search').fill('HTEM');
+  await page.locator('[data-filter="50"]').click();
+  await expect(page.locator('.catalog-item')).toHaveCount(1);
+  await page.getByLabel('Длина Труба HTEM Ø50', { exact: true }).selectOption('1500');
+  await page.locator('#catalog-search').fill('не существует');
+  await expect(page.locator('#catalog-list')).toHaveText('Элементы не найдены');
+  await page.locator('#catalog-search').fill('HTEM');
+  await expect(page.getByLabel('Длина Труба HTEM Ø50', { exact: true })).toHaveValue('1500');
+  await page.locator('[data-type-id="pipe-50"]').click();
+  await expect(page.locator('#object-count')).toHaveText('Элементов: 2');
+  await expect(page.locator('#bom-total')).toHaveText('2');
+  await page.locator('#bom-open').click();
+  await expect(page.locator('#bom-list')).toContainText('1500 мм');
+  const download = page.waitForEvent('download');
+  await page.locator('#bom-download').click();
+  expect((await download).suggestedFilename()).toBe('complan-specifikaciya.xlsx');
+  expect(errors).toEqual([]);
+});

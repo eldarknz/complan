@@ -1,25 +1,41 @@
 import * as THREE from 'three';
-import { catalogById } from './catalog.js';
-import { connectionPose, getPorts } from './elements.js';
-import { findPort } from './connections.js';
+import { catalogById, type CatalogItem } from './catalog.js';
+import { connectionPose, getPorts, type Port } from './elements.js';
+import { findPort, type Connections, type ConnectionEdge } from './connections.js';
+
+type CreateElement = (typeId: string, length?: number) => THREE.Object3D;
+type RebuildElement = (element: THREE.Object3D) => void;
+interface Turn { angles: number[]; normal: THREE.Vector3 | null }
+interface RouteOptions {
+  points: THREE.Vector3[];
+  diameter: number;
+  elements: THREE.Object3D[];
+  graph: Connections;
+  create: CreateElement;
+  rebuild: RebuildElement;
+}
+type Attachment = { element: THREE.Object3D; distance: number; point: THREE.Vector3 } & (
+  { kind: 'port'; port: Port; along?: never; axis?: never } |
+  { kind: 'body'; along: number; axis: THREE.Vector3; port?: never }
+);
 
 const ELBOW_ANGLES = [15, 30, 45, 67, 87];
 const TEE_ANGLES = [45, 67, 87];
 
-export function insertionDepth(diameter) {
+export function insertionDepth(diameter: number) {
   return diameter === 110 ? 60 : 30;
 }
 
-export function stockLengths(diameter) {
+export function stockLengths(diameter: number) {
   return catalogById.get(`pipe-${diameter}`)?.lengths?.slice() ?? [];
 }
 
-export function elbowReach(diameter, angle) {
+export function elbowReach(diameter: number, angle: number) {
   const radians = THREE.MathUtils.degToRad(angle);
   return diameter * .7 + diameter * Math.tan(radians / 2);
 }
 
-export function chooseElbows(deflection) {
+export function chooseElbows(deflection: number) {
   if (!(deflection >= 7)) return [];
   const single = ELBOW_ANGLES.map((angle) => ({ angles: [angle], error: Math.abs(angle - deflection) }))
     .reduce((best, item) => item.error < best.error ? item : best);
@@ -35,13 +51,13 @@ export function chooseElbows(deflection) {
   return pair && pair.error < single.error ? pair.angles : single.angles;
 }
 
-function nearestStock(value, diameter) {
+function nearestStock(value: number, diameter: number) {
   const stock = stockLengths(diameter);
   if (!stock.length || !(value > 0)) return null;
   return stock.reduce((best, length) => Math.abs(length - value) < Math.abs(best - value) ? length : best);
 }
 
-export function fitPipeLengths(target, diameter) {
+export function fitPipeLengths(target: number, diameter: number) {
   const stock = stockLengths(diameter).slice().sort((left, right) => right - left);
   if (!stock.length || !(target > 0)) return [];
   const lengths = [];
@@ -55,7 +71,7 @@ export function fitPipeLengths(target, diameter) {
   return lengths;
 }
 
-export function simplifyRoute(points, minLength = 80, minTurn = 7) {
+export function simplifyRoute(points: THREE.Vector3[], minLength = 80, minTurn = 7) {
   const cleaned = [];
   for (const point of points) {
     const next = point.clone();
@@ -72,7 +88,7 @@ export function simplifyRoute(points, minLength = 80, minTurn = 7) {
   return simplified;
 }
 
-function segmentPlan(points) {
+function segmentPlan(points: THREE.Vector3[]) {
   const lengths = [];
   const directions = [];
   for (let index = 0; index < points.length - 1; index++) {
@@ -93,15 +109,17 @@ function segmentPlan(points) {
   return { lengths, directions, turns };
 }
 
-function fallback(message) {
-  const error = new Error(message);
-  error.routeFallback = true;
-  return error;
+class RouteFallback extends Error {
+  routeFallback = true;
 }
 
-export function findAttachment(point, elements, graph, thresholds = { port: 220, body: 140 }) {
-  let bestPort = null;
-  let bestBody = null;
+function fallback(message: string) {
+  return new RouteFallback(message);
+}
+
+export function findAttachment(point: THREE.Vector3, elements: THREE.Object3D[], graph: Connections, thresholds = { port: 220, body: 140 }): Attachment | null {
+  let bestPort: Attachment | null = null;
+  let bestBody: Attachment | null = null;
   for (const element of elements) {
     const item = catalogById.get(element.userData.typeId);
     if (!item || item.accessory) continue;
@@ -123,22 +141,22 @@ export function findAttachment(point, elements, graph, thresholds = { port: 220,
   return bestBody;
 }
 
-function axisOf(element) {
+function axisOf(element: THREE.Object3D) {
   return new THREE.Vector3(1, 0, 0).applyQuaternion(element.quaternion).normalize();
 }
 
-function offAxisAngle(axis, direction) {
+function offAxisAngle(axis: THREE.Vector3, direction: THREE.Vector3) {
   if (direction.lengthSq() < 1) return 0;
   const deflection = THREE.MathUtils.radToDeg(axis.angleTo(direction.clone().normalize()));
   return Math.min(deflection, 180 - deflection);
 }
 
-function pipeRun(element) {
+function pipeRun(element: THREE.Object3D) {
   const item = catalogById.get(element.userData.typeId);
   return item?.kind === 'pipe' && !item.plain && !item.fixed ? item : null;
 }
 
-function portWorld(element, portId) {
+function portWorld(element: THREE.Object3D, portId: string) {
   const port = findPort(element, portId);
   return {
     position: port.position.clone().applyQuaternion(element.quaternion).add(element.position),
@@ -146,7 +164,7 @@ function portWorld(element, portId) {
   };
 }
 
-function basisQuaternion(direction, upHint) {
+function basisQuaternion(direction: THREE.Vector3, upHint: THREE.Vector3) {
   const x = direction.clone().normalize();
   let y = upHint.clone().addScaledVector(x, -upHint.dot(x));
   if (y.lengthSq() < 1e-8) {
@@ -158,12 +176,12 @@ function basisQuaternion(direction, upHint) {
   return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
 }
 
-function rollToAim(source, sourcePortId, targetItem, targetPortId, localDirection, desiredWorld) {
+function rollToAim(source: THREE.Object3D, sourcePortId: string, targetItem: CatalogItem, targetPortId: string, localDirection: THREE.Vector3, desiredWorld: THREE.Vector3) {
   const sourcePort = findPort(source, sourcePortId);
   const pose = connectionPose(source, sourcePort, targetItem, targetItem.length, targetPortId, 0);
   if (!pose) return 0;
   const axis = sourcePort.direction.clone().applyQuaternion(source.quaternion).normalize();
-  const project = (vector) => vector.clone().addScaledVector(axis, -vector.dot(axis));
+  const project = (vector: THREE.Vector3) => vector.clone().addScaledVector(axis, -vector.dot(axis));
   const from = project(localDirection.clone().applyQuaternion(pose.quaternion));
   const to = project(desiredWorld);
   if (from.lengthSq() < 1e-8 || to.lengthSq() < 1e-8) return 0;
@@ -172,7 +190,7 @@ function rollToAim(source, sourcePortId, targetItem, targetPortId, localDirectio
   return THREE.MathUtils.radToDeg(Math.atan2(from.clone().cross(to).dot(axis), from.dot(to)));
 }
 
-function connect(graph, source, sourcePort, target, aim = null) {
+function connect(graph: Connections, source: THREE.Object3D, sourcePort: string, target: THREE.Object3D, aim: THREE.Vector3 | null = null) {
   const item = catalogById.get(target.userData.typeId);
   const targetPort = findPort(source, sourcePort).socket ? 'in' : 'out';
   const exitPort = targetPort === 'in' ? 'out' : 'in';
@@ -182,14 +200,14 @@ function connect(graph, source, sourcePort, target, aim = null) {
   return exitPort;
 }
 
-function restoreTwist(element, portId, quaternionBefore, graph) {
+function restoreTwist(element: THREE.Object3D, portId: string, quaternionBefore: THREE.Quaternion, graph: Connections) {
   const axis = portWorld(element, portId).direction;
   const delta = quaternionBefore.clone().multiply(element.quaternion.clone().invert()).normalize();
   const angle = THREE.MathUtils.radToDeg(2 * Math.atan2(new THREE.Vector3(delta.x, delta.y, delta.z).dot(axis), delta.w));
   if (Number.isFinite(angle) && Math.abs(angle) > .05) graph.twist(element, portId, angle);
 }
 
-function chooseTee(main, branch, deflection) {
+function chooseTee(main: number, branch: number, deflection: number) {
   let best = null;
   for (const angle of TEE_ANGLES) {
     const item = catalogById.get(`tee-${main}-${branch}-${angle}`);
@@ -200,11 +218,11 @@ function chooseTee(main, branch, deflection) {
   return best;
 }
 
-function otherEnd(edge, element) {
+function otherEnd(edge: ConnectionEdge, element: THREE.Object3D) {
   return edge.a === element ? { element: edge.b, port: edge.bp } : { element: edge.a, port: edge.ap };
 }
 
-function insertTee(pipe, along, desired, branchDiameter, graph, make, rebuild) {
+function insertTee(pipe: THREE.Object3D, along: number, desired: THREE.Vector3, branchDiameter: number, graph: Connections, make: CreateElement, rebuild: RebuildElement) {
   const item = catalogById.get(pipe.userData.typeId);
   if (!item || item.kind !== 'pipe' || item.plain || item.fixed) throw fallback('Ответвление ставится только на прямую трубу. Линия построена отдельно');
   const axis = new THREE.Vector3(1, 0, 0).applyQuaternion(pipe.quaternion).normalize();
@@ -244,7 +262,7 @@ function insertTee(pipe, along, desired, branchDiameter, graph, make, rebuild) {
   return fitting;
 }
 
-function attachToPort(element, port, routeDiameter, graph, make) {
+function attachToPort(element: THREE.Object3D, port: Port, routeDiameter: number, graph: Connections, make: CreateElement) {
   const sourceDiameter = port.diameter;
   let current = element;
   let currentPort = port.id;
@@ -275,7 +293,7 @@ function attachToPort(element, port, routeDiameter, graph, make) {
   return { element: sleeve, port: 'out' };
 }
 
-function describe(elements) {
+function describe(elements: THREE.Object3D[]) {
   const counts = new Map();
   for (const element of elements) {
     const item = catalogById.get(element.userData.typeId);
@@ -285,7 +303,7 @@ function describe(elements) {
   return [...counts].map(([name, count]) => count > 1 ? `${name} x ${count}` : name).join(', ');
 }
 
-export function assembleRoute({ points, diameter, elements, graph, create, rebuild }) {
+export function assembleRoute({ points, diameter, elements, graph, create, rebuild }: RouteOptions) {
   const route = simplifyRoute(points.map((point) => point.clone()));
   if (![50, 110].includes(diameter)) throw new Error('Автоподбор поддерживает только Ø50 и Ø110');
   if (route.length < 2) throw new Error('Нужны хотя бы две точки, расстояние между ними от 80 мм');
@@ -300,8 +318,8 @@ export function assembleRoute({ points, diameter, elements, graph, create, rebui
     } else hit = startHit;
   }
   if (hit) ordered[0].copy(hit.point);
-  const created = [];
-  const make = (typeId, length) => {
+  const created: THREE.Object3D[] = [];
+  const make: CreateElement = (typeId, length) => {
     const element = create(typeId, length ?? catalogById.get(typeId).length);
     created.push(element);
     return element;
@@ -343,7 +361,7 @@ export function assembleRoute({ points, diameter, elements, graph, create, rebui
   if (anchor) consumed = portWorld(anchor.element, anchor.port).position.sub(ordered[0]).dot(heading);
   let last = anchor?.element ?? null;
   let lastPort = anchor?.port ?? null;
-  const placeElbows = (turn) => {
+  const placeElbows = (turn: Turn) => {
     if (!turn.angles.length || !turn.normal) return 0;
     const before = last ? portWorld(last, lastPort).position.clone() : ordered[0].clone();
     const incoming = heading.clone();

@@ -1,9 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import './style.css';
-import './catalog.css';
-import './connections.css';
 import { catalog, catalogById } from './catalog.js';
 import { buildElement, getPorts, compatiblePorts, disposeElement, supportsPipeColor, pipeColorById, defaultPipeColor } from './elements.js';
 import { parseProject, parseConnections, serializeProject } from './project.js';
@@ -11,8 +8,15 @@ import { initializeInterface, updateBillOfMaterials, getCatalogColor, syncColorS
 import { Connections, elementPorts, findPort, poseOf, nearestConnection } from './connections.js';
 import { assembleRoute, findAttachment } from './route.js';
 import { CommandHistory } from './history.js';
+import { editorStore } from './store.js';
 
-const $ = (selector) => document.querySelector(selector);
+type Axis = 'x' | 'y' | 'z';
+interface RouteAxis { id: string; direction: THREE.Vector3; color: string }
+interface RoutePointer { clientX: number; clientY: number; shiftKey: boolean }
+
+export function initializeEditor() {
+const lifetime = new AbortController();
+const $ = (selector: string) => document.querySelector<HTMLInputElement>(selector)!;
 const viewport = $('#viewport');
 initializeInterface((item, length = item.length) => {
   const before = captureState();
@@ -109,11 +113,11 @@ const axes = new THREE.AxesHelper(250);
 axes.position.set(0, 2, 0);
 scene.add(axes);
 
-const pipes = [];
+const pipes: THREE.Object3D[] = [];
 const connections = new Connections();
 let routeActive = false;
 let routeDiameter = 110;
-let routePoints = [];
+let routePoints: THREE.Vector3[] = [];
 const routePreview = new THREE.Group();
 scene.add(routePreview);
 const routeMaterial = new THREE.MeshBasicMaterial({ color: '#e25a12', depthTest: false });
@@ -125,21 +129,21 @@ const routeAxes = [
   { id: 'z', direction: new THREE.Vector3(0, 0, 1), color: '#2f6ed6' },
 ];
 const routeAxisMaterials = Object.fromEntries(routeAxes.map((axis) => [axis.id, new THREE.MeshBasicMaterial({ color: axis.color, depthTest: false })]));
-let routeLockedAxis = null;
-let routePointer = null;
-let lastPose = null;
-let snapCandidate = null;
+let routeLockedAxis: RouteAxis | null = null;
+let routePointer: RoutePointer | null = null;
+let lastPose: ReturnType<typeof poseOf> | null = null;
+let snapCandidate: ReturnType<typeof nearestConnection> = null;
 const snapPaused = new WeakSet();
 let translatedDuringDrag = false;
 const portMarkers = new THREE.Group();
 scene.add(portMarkers);
-let selected = null;
+let selected: THREE.Object3D | null = null;
 let nextId = 1;
-let outline;
+let outline: THREE.BoxHelper | null;
 const radians = THREE.MathUtils.degToRad;
 const degrees = THREE.MathUtils.radToDeg;
-const history = new CommandHistory(10);
-let dragBefore = null;
+const history = new CommandHistory<ReturnType<typeof captureState>>(10);
+let dragBefore: ReturnType<typeof captureState> | null = null;
 const jointPivot = new THREE.Object3D();
 scene.add(jointPivot);
 const pivotPrevious = new THREE.Quaternion();
@@ -203,7 +207,7 @@ function captureState() {
   };
 }
 
-function restoreState(state) {
+function restoreState(state: ReturnType<typeof captureState>) {
   select(null);
   [...pipes].forEach(removePipe);
   state.project.elements.forEach((entry, index) => {
@@ -231,12 +235,12 @@ function updateHistoryButtons() {
   $('#redo').title = `Повторить — Cmd/Ctrl+Shift+Z (${history.future.length})`;
 }
 
-function recordEdit(before) {
+function recordEdit(before: ReturnType<typeof captureState>) {
   history.record(before, captureState());
   updateHistoryButtons();
 }
 
-function travelHistory(direction) {
+function travelHistory(direction: 'undo' | 'redo') {
   if (transform.dragging) return;
   const state = direction === 'undo' ? history.undo() : history.redo();
   if (!state) return;
@@ -247,7 +251,7 @@ function travelHistory(direction) {
 $('#undo').onclick = () => travelHistory('undo');
 $('#redo').onclick = () => travelHistory('redo');
 
-function createElement(typeId = 'pipe-110', length, position = new THREE.Vector3(0, 100, 0), quaternion = new THREE.Quaternion(), color, silent = false) {
+function createElement(typeId = 'pipe-110', length?: number, position = new THREE.Vector3(0, 100, 0), quaternion = new THREE.Quaternion(), color?: string, silent = false) {
   const item = catalogById.get(typeId);
   length ??= item.length;
   const resolved = supportsPipeColor(item) ? (pipeColorById.has(color) ? color : getCatalogColor()) : undefined;
@@ -279,7 +283,10 @@ function updateOutline() {
 
 function updatePortMarkers() {
   $('#snap-status').textContent = selected && snapPaused.has(selected) ? 'Первое перемещение без магнита' : snapCandidate ? 'Совместимо — отпустите мышь' : 'до 90 мм';
-  for (const marker of [...portMarkers.children]) { marker.geometry.dispose(); marker.material.dispose(); portMarkers.remove(marker); }
+  for (const marker of [...portMarkers.children]) {
+    if (marker instanceof THREE.Mesh) { marker.geometry.dispose(); marker.material.dispose(); }
+    portMarkers.remove(marker);
+  }
   if (!selected) return;
   for (const port of elementPorts(selected)) {
     const occupied = connections.at(selected, port.id);
@@ -303,7 +310,7 @@ function applyAssemblyMove() {
   lastPose = poseOf(selected);
 }
 
-function select(pipe) {
+function select(pipe: THREE.Object3D | null) {
   if (pipe !== selected) { $('#rotation-scope').value = 'joint'; $('#rotation-port').value = ''; }
   selected = pipe;
   lastPose = pipe ? poseOf(pipe) : null;
@@ -324,10 +331,10 @@ function updateFields() {
   $('#element-diameter').textContent = item.branch || item.outlet ? `${item.diameter} / ${item.branch || item.outlet} мм` : `${item.diameter} мм`;
   $('#length').disabled = item.kind !== 'pipe' || !!item.fixed;
   $('.field-label[for="length"]').textContent = item.kind === 'pipe' ? 'Длина трубы' : 'Эскизный габарит (фиксированный)';
-  const presets = $('#length').closest('section').querySelector('.presets');
+  const presets = $('#length').closest('section').querySelector<HTMLElement>('.presets');
   presets.hidden = item.kind !== 'pipe' || !!item.fixed;
   presets.replaceChildren(...(item.lengths || []).map((length) => {
-    const button = document.createElement('button'); button.textContent = length; button.dataset.length = length;
+    const button = document.createElement('button'); button.textContent = String(length); button.dataset.length = String(length);
     button.onclick = () => changeLength(length); return button;
   }));
   $('#length').value = selected.userData.length;
@@ -338,14 +345,14 @@ function updateFields() {
     $('#element-color-name').textContent = pipeColorById.get(color).name;
     syncColorSwatches($('#element-colors'), color);
   }
-  for (const axis of ['x', 'y', 'z']) {
-    $(`#position-${axis}`).value = +selected.position[axis].toFixed(1);
-    $(`#rotation-${axis}`).value = +degrees(selected.rotation[axis]).toFixed(1);
+  for (const axis of ['x', 'y', 'z'] as const) {
+    $(`#position-${axis}`).value = String(+selected.position[axis].toFixed(1));
+    $(`#rotation-${axis}`).value = String(+degrees(selected.rotation[axis]).toFixed(1));
   }
-  document.querySelectorAll('[data-length]').forEach((button) => button.classList.toggle('active', +button.dataset.length === selected.userData.length));
+  document.querySelectorAll<HTMLButtonElement>('[data-length]').forEach((button) => button.classList.toggle('active', +button.dataset.length === selected.userData.length));
 }
 
-function applyAxisValue(kind, axis, value) {
+function applyAxisValue(kind: 'position' | 'rotation', axis: Axis, value: number) {
   if (!selected) return;
   if (!Number.isFinite(value) || Math.abs(value) > (kind === 'position' ? 1000000 : 36000)) { updateFields(); return; }
   const before = captureState();
@@ -356,8 +363,8 @@ function applyAxisValue(kind, axis, value) {
   recordEdit(before);
 }
 
-for (const kind of ['position', 'rotation']) {
-  for (const axis of ['x', 'y', 'z']) {
+for (const kind of ['position', 'rotation'] as const) {
+  for (const axis of ['x', 'y', 'z'] as const) {
     const label = document.createElement('div');
     label.className = kind === 'rotation' ? 'axis-input rotation-axis' : 'axis-input';
     label.innerHTML = `<span>${axis.toUpperCase()}</span><input id="${kind}-${axis}" type="number" step="${kind === 'position' ? 10 : 5}" aria-label="${kind === 'position' ? 'Положение' : 'Поворот'} ${axis.toUpperCase()}" />`;
@@ -376,28 +383,29 @@ for (const kind of ['position', 'rotation']) {
       }
     }
     $(`#${kind}-fields`).append(label);
-    label.querySelector('input').addEventListener('change', (event) => applyAxisValue(kind, axis, event.target.valueAsNumber));
+    label.querySelector('input').addEventListener('change', (event) => applyAxisValue(kind, axis, (event.target as HTMLInputElement).valueAsNumber));
   }
 }
 
-function rebuildBody(element) {
+function rebuildBody(element: THREE.Object3D) {
   disposeElement(element);
   element.clear();
   const replacement = buildElement(element.userData.typeId, element.userData.length, element.userData.color);
   [...replacement.children].forEach((child) => element.add(child));
 }
 
-function changeColor(color) {
+function changeColor(color: string) {
   const item = selected && catalogById.get(selected.userData.typeId);
   if (!supportsPipeColor(item) || !pipeColorById.has(color) || selected.userData.color === color) return;
   const before = captureState();
   selected.userData.color = color;
   rebuildBody(selected);
   updateFields();
+  updateCount();
   recordEdit(before);
 }
 
-function changeLength(value) {
+function changeLength(value: number) {
   if (!selected || catalogById.get(selected.userData.typeId).kind !== 'pipe' || catalogById.get(selected.userData.typeId).fixed) return;
   if (!Number.isFinite(value) || value < 150 || value > 6000) { toast('Допустимая длина: от 150 до 6000 мм'); updateFields(); return; }
   const before = captureState();
@@ -407,8 +415,8 @@ function changeLength(value) {
   updateFields(); updateConnections(); updateOutline(); updateCount();
   recordEdit(before);
 }
-$('#length').addEventListener('change', (event) => changeLength(event.target.valueAsNumber));
-document.querySelectorAll('[data-length]').forEach((button) => button.addEventListener('click', () => changeLength(+button.dataset.length)));
+$('#length').onchange = () => changeLength($('#length').valueAsNumber);
+document.querySelectorAll<HTMLButtonElement>('[data-length]').forEach((button) => button.onclick = () => changeLength(+button.dataset.length));
 function selectedPort() {
   if (!selected) return null;
   return getPorts(catalogById.get(selected.userData.typeId), selected.userData.length).find((port) => port.id === $('#port-select').value);
@@ -493,7 +501,7 @@ $('#detach-element').onclick = () => {
   updateConnections(); updateOutline();
   toast('Деталь отсоединена. Теперь её можно отодвинуть отдельно.');
 };
-for (const [id, angle] of [['twist-minus', -15], ['twist-plus', 15], ['twist-quarter', 90]]) {
+for (const [id, angle] of [['twist-minus', -15], ['twist-plus', 15], ['twist-quarter', 90]] as const) {
   $(`#${id}`).onclick = () => {
     if (!selected) return;
     connections.twist(selected, $('#port-select').value, angle);
@@ -502,7 +510,7 @@ for (const [id, angle] of [['twist-minus', -15], ['twist-plus', 15], ['twist-qua
 }
 $('#snap-enabled').onchange = () => { snapCandidate = null; updatePortMarkers(); };
 $('#duplicate').onclick = () => { if (selected) createElement(selected.userData.typeId, selected.userData.length, selected.position.clone().add(new THREE.Vector3(0, 0, 180)), selected.quaternion.clone(), selected.userData.color); };
-function removePipe(pipe) {
+function removePipe(pipe: THREE.Object3D) {
   connections.remove(pipe);
   scene.remove(pipe);
   disposeElement(pipe);
@@ -521,7 +529,7 @@ $('#delete-all').onclick = () => {
   toast('Все элементы удалены');
 };
 $('#reset-rotation').onclick = () => { if (selected && !jointRotationPort()) { selected.rotation.set(0, 0, 0); applyAssemblyMove(); updateFields(); updateOutline(); syncTransform(); } };
-function setMode(mode) {
+function setMode(mode: 'translate' | 'rotate') {
   transform.setMode(mode);
   $('#move').classList.toggle('active', mode === 'translate');
   $('#rotate').classList.toggle('active', mode === 'rotate');
@@ -540,12 +548,13 @@ function focus(view = 'perspective') {
   orbit.target.copy(center);
   camera.position.copy(center).addScaledVector(direction, distance);
   orbit.update();
-  document.querySelectorAll('[data-view]').forEach((button) => button.classList.toggle('active', button.dataset.view === view));
+  document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => button.classList.toggle('active', button.dataset.view === view));
 }
 $('#focus').onclick = () => focus();
-document.querySelectorAll('[data-view]').forEach((button) => button.onclick = () => focus(button.dataset.view));
+document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => button.onclick = () => focus(button.dataset.view));
 window.addEventListener('keydown', (event) => {
-  const editing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target.isContentEditable;
+  if (editorStore.bomOpen || event.defaultPrevented) return;
+  const editing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLElement && event.target.isContentEditable;
   if (!editing && (event.metaKey || event.ctrlKey) && !event.altKey && (event.code === 'KeyZ' || ['z', 'я'].includes(event.key.toLowerCase()))) {
     event.preventDefault();
     travelHistory(event.shiftKey ? 'redo' : 'undo');
@@ -565,12 +574,12 @@ window.addEventListener('keydown', (event) => {
   if ((key === 'delete' || key === 'backspace') && routeActive) { event.preventDefault(); undoRoutePoint(); return; }
   if (key === 'delete' || key === 'backspace') { event.preventDefault(); $('#delete').click(); }
   if (key === 'escape') select(null);
-});
+}, { signal: lifetime.signal });
 window.addEventListener('keyup', (event) => {
   if (event.key === 'Shift' && routeActive && routePointer) syncRoutePointer(false);
-});
+}, { signal: lifetime.signal });
 const raycaster = new THREE.Raycaster();
-let pointerStart;
+let pointerStart: { x: number; y: number; gizmo: boolean } | undefined;
 renderer.domElement.addEventListener('pointerdown', (event) => { pointerStart = { x: event.clientX, y: event.clientY, gizmo: !!transform.axis }; });
 renderer.domElement.addEventListener('pointerup', (event) => {
   if (event.button !== 0 || !pointerStart || pointerStart.gizmo || transform.dragging || Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 4) return;
@@ -586,8 +595,8 @@ renderer.domElement.addEventListener('pointerup', (event) => {
   const hit = raycaster.intersectObjects(pipes, true)[0];
   if (hit) select(hit.object.parent); else select(null);
 });
-let toastTimer;
-function toast(message) {
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+function toast(message: string) {
   $('#toast').textContent = message;
   $('#toast').classList.add('visible');
   clearTimeout(toastTimer);
@@ -603,11 +612,13 @@ $('#save').onclick = () => {
 };
 $('#load').onclick = () => $('#file').click();
 $('#file').onchange = async (event) => {
-  const file = event.target.files[0];
+  const input = event.target as HTMLInputElement;
+  const file = input.files[0];
   if (!file) return;
   try {
     if (file.size > 2e6) throw new Error();
     const data = JSON.parse(await file.text());
+    if (lifetime.signal.aborted) return;
     const entries = parseProject(data);
     const edges = parseConnections(data, entries);
     const before = captureState();
@@ -620,36 +631,37 @@ $('#file').onchange = async (event) => {
     updateCount(); focus(); toast('Проект открыт');
     recordEdit(before);
   } catch { toast('Не удалось открыть: некорректный файл проекта'); }
-  event.target.value = '';
+  input.value = '';
 };
-new ResizeObserver(() => {
+const resizeObserver = new ResizeObserver(() => {
   const { width, height } = viewport.getBoundingClientRect();
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
   renderer.setSize(width, height);
-}).observe(viewport);
+});
+resizeObserver.observe(viewport);
 for (const id of ['connect', 'disconnect', 'detach-element', 'twist-minus', 'twist-plus', 'twist-quarter', 'apply-joint-angle', 'duplicate', 'delete', 'delete-all', 'reset-rotation']) {
   const button = $(`#${id}`);
   const action = button.onclick;
   button.onclick = (event) => {
     const before = captureState();
-    action(event);
+    action.call(button, event);
     recordEdit(before);
   };
 }
 const routeHint = $('.scene-bottom span');
 const routeHintDefault = routeHint.textContent;
 
-const routeLabels = [];
-const routeGizmos = [];
+const routeLabels: THREE.Sprite[] = [];
+const routeGizmos: THREE.Group[] = [];
 const routeLabelUp = new THREE.Vector3();
 const routeLabelSide = new THREE.Vector3();
 
 function clearRoutePreview() {
   for (const child of [...routePreview.children]) {
     child.traverse((object) => {
-      object.geometry?.dispose();
-      if (object.isSprite || object.userData.disposeMaterial) {
+      if (object instanceof THREE.Mesh) object.geometry.dispose();
+      if (object instanceof THREE.Sprite || object instanceof THREE.Mesh && object.userData.disposeMaterial) {
         object.material?.map?.dispose();
         object.material?.dispose();
       }
@@ -660,7 +672,7 @@ function clearRoutePreview() {
   routeGizmos.length = 0;
 }
 
-function routeSegment(start, end, material, radius = 14) {
+function routeSegment(start: THREE.Vector3, end: THREE.Vector3, material: THREE.Material, radius = 14) {
   const delta = end.clone().sub(start);
   const length = delta.length();
   if (length < 1) return;
@@ -671,14 +683,14 @@ function routeSegment(start, end, material, radius = 14) {
   routePreview.add(mesh);
 }
 
-function routeDot(position, material, radius) {
+function routeDot(position: THREE.Vector3, material: THREE.Material, radius: number) {
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 12), material);
   mesh.position.copy(position);
   mesh.renderOrder = 6;
   routePreview.add(mesh);
 }
 
-function makeRouteSprite(text, color) {
+function makeRouteSprite(text: string, color: string) {
   const font = '700 48px Manrope, Arial, sans-serif';
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
@@ -708,7 +720,7 @@ function makeRouteSprite(text, color) {
   return { sprite, aspect: width / height };
 }
 
-function routeLengthLabel(start, end, color, radius) {
+function routeLengthLabel(start: THREE.Vector3, end: THREE.Vector3, color: string, radius: number) {
   const length = start.distanceTo(end);
   if (length < 1) return;
   const { sprite, aspect } = makeRouteSprite(`${Math.round(length)} мм`, color);
@@ -720,7 +732,7 @@ function routeLengthLabel(start, end, color, radius) {
   };
 }
 
-function routeAngleMark(start, end, axis) {
+function routeAngleMark(start: THREE.Vector3, end: THREE.Vector3, axis: THREE.Vector3) {
   const approach = start.clone().sub(end);
   if (approach.lengthSq() < 1) return;
   approach.normalize();
@@ -792,7 +804,7 @@ function updateRouteLabels() {
   }
 }
 
-function routeArrow(origin, axis, active) {
+function routeArrow(origin: THREE.Vector3, axis: RouteAxis, active: boolean) {
   const group = new THREE.Group();
   group.position.copy(origin);
   group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis.direction);
@@ -812,7 +824,7 @@ function routeArrow(origin, axis, active) {
   routeGizmos.push(group);
 }
 
-function refreshRoutePreview(cursor = null, snapped = false, pipeSnapAxis = null, drawAxis = null) {
+function refreshRoutePreview(cursor: THREE.Vector3 | null = null, snapped = false, pipeSnapAxis: THREE.Vector3 | null = null, drawAxis: RouteAxis | null = null) {
   clearRoutePreview();
   routePoints.forEach((point) => routeDot(point, routeMaterial, 16));
   for (let index = 1; index < routePoints.length; index++) {
@@ -830,7 +842,7 @@ function refreshRoutePreview(cursor = null, snapped = false, pipeSnapAxis = null
   updateRouteLabels();
 }
 
-function pipeAxis(element) {
+function pipeAxis(element: THREE.Object3D) {
   const item = catalogById.get(element.userData.typeId);
   if (!item || item.kind !== 'pipe') return null;
   return new THREE.Vector3(1, 0, 0).applyQuaternion(element.quaternion).normalize();
@@ -841,14 +853,14 @@ function routePlaneHeight() {
   return Number.isFinite(value) && Math.abs(value) <= 20000 ? value : 200;
 }
 
-function routeNdc(event) {
+function routeNdc(event: RoutePointer) {
   const rect = renderer.domElement.getBoundingClientRect();
   const ndc = new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
   return ndc;
 }
 
-function axisUnderCursor(origin, ndc) {
+function axisUnderCursor(origin: THREE.Vector3, ndc: THREE.Vector2) {
   const originNdc = origin.clone().project(camera);
   const dx = ndc.x - originNdc.x;
   const dy = ndc.y - originNdc.y;
@@ -870,7 +882,7 @@ function axisUnderCursor(origin, ndc) {
   return best;
 }
 
-function pointOnAxis(origin, direction) {
+function pointOnAxis(origin: THREE.Vector3, direction: THREE.Vector3) {
   const rayDirection = raycaster.ray.direction;
   const offset = raycaster.ray.origin.clone().sub(origin);
   const parallel = rayDirection.dot(direction);
@@ -882,7 +894,7 @@ function pointOnAxis(origin, direction) {
   return point;
 }
 
-function routeDrawAxis(event, ndc) {
+function routeDrawAxis(event: RoutePointer, ndc: THREE.Vector2) {
   if (!routePoints.length) {
     routeLockedAxis = null;
     return null;
@@ -897,7 +909,7 @@ function routeDrawAxis(event, ndc) {
   return best && best.perpPx < 16 ? best : null;
 }
 
-function routePointFromEvent(event) {
+function routePointFromEvent(event: RoutePointer) {
   const ndc = routeNdc(event);
   const drawAxis = routeDrawAxis(event, ndc);
   let point = null;
@@ -926,14 +938,14 @@ function routePointFromEvent(event) {
   return { point, snapped: false, drawAxis };
 }
 
-function syncRoutePointer(shiftKey) {
+function syncRoutePointer(shiftKey: boolean) {
   routePointer.shiftKey = shiftKey;
   if (!shiftKey) routeLockedAxis = null;
   const result = routePointFromEvent(routePointer);
   refreshRoutePreview(result?.point ?? null, result?.snapped, result?.axis ?? null, result?.drawAxis ?? null);
 }
 
-function pointsLabel(count) {
+function pointsLabel(count: number) {
   const mod10 = count % 10;
   const mod100 = count % 100;
   if (mod10 === 1 && mod100 !== 11) return `${count} точка`;
@@ -954,15 +966,15 @@ function updateRouteUi() {
   $('#route-draw').textContent = routeActive ? 'Рисование включено' : 'Рисовать линию';
   $('#route-draw').setAttribute('aria-pressed', String(routeActive));
   $('#route-mode').textContent = routeActive ? `Ø${routeDiameter}` : 'выкл';
-  document.querySelectorAll('[data-route-diameter]').forEach((button) => button.classList.toggle('active', +button.dataset.routeDiameter === routeDiameter));
+  document.querySelectorAll<HTMLButtonElement>('[data-route-diameter]').forEach((button) => button.classList.toggle('active', +button.dataset.routeDiameter === routeDiameter));
   routeHint.textContent = routeActive ? 'ЛКМ - точка, вдоль оси или Shift - фиксация оси, ПКМ - обзор' : routeHintDefault;
 }
 
-function setRouteActive(active) {
+function setRouteActive(active: boolean) {
   routeActive = active;
   viewport.classList.toggle('routing', active);
   if (active) {
-    orbit.mouseButtons.LEFT = -1;
+    orbit.mouseButtons.LEFT = null;
     orbit.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
     select(null);
   } else {
@@ -977,7 +989,7 @@ function setRouteActive(active) {
   updateRouteUi();
 }
 
-function addRoutePoint(result) {
+function addRoutePoint(result: NonNullable<ReturnType<typeof routePointFromEvent>>) {
   if (routePoints.at(-1)?.distanceTo(result.point) < 80) { toast('Точка слишком близко к предыдущей'); return; }
   if (routePoints.length >= 40) { toast('Для одной линии достаточно 40 точек'); return; }
   routePoints.push(result.point.clone());
@@ -992,7 +1004,7 @@ function undoRoutePoint() {
   refreshRoutePreview();
 }
 
-document.querySelectorAll('[data-route-diameter]').forEach((button) => button.onclick = () => {
+document.querySelectorAll<HTMLButtonElement>('[data-route-diameter]').forEach((button) => button.onclick = () => {
   routeDiameter = +button.dataset.routeDiameter;
   setRouteActive(true);
 });
@@ -1034,3 +1046,29 @@ renderer.domElement.addEventListener('contextmenu', (event) => { if (routeActive
 updateRouteUi();
 createElement();
 renderer.setAnimationLoop(() => { orbit.update(); updateRouteLabels(); renderer.render(scene, camera); });
+return () => {
+  lifetime.abort();
+  clearTimeout(toastTimer);
+  resizeObserver.disconnect();
+  renderer.setAnimationLoop(null);
+  transform.detach();
+  transform.dispose();
+  orbit.dispose();
+  clearRoutePreview();
+  const materials = new Set<THREE.Material>();
+  scene.traverse((object) => {
+    if (object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.Sprite) {
+      if ('geometry' in object) object.geometry.dispose();
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material);
+    }
+  });
+  for (const material of [...materials, routeMaterial, routeLiveMaterial, routeSnapMaterial, ...Object.values(routeAxisMaterials)]) material.dispose();
+  sun.shadow.dispose();
+  renderer.dispose();
+  renderer.domElement.remove();
+  $('#position-fields').replaceChildren();
+  $('#rotation-fields').replaceChildren();
+  editorStore.setCommands(null, null);
+  editorStore.updateElements([]);
+};
+}
