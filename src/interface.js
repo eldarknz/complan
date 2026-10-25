@@ -102,8 +102,8 @@ async function downloadBomExcel() {
 }
 
 export function initializeInterface(onAdd, onRecolor) {
-  $('#save').insertAdjacentHTML('beforebegin', '<button id="undo" class="quiet" type="button" title="Отменить — Cmd/Ctrl+Z" aria-label="Отменить действие" disabled>↶</button><button id="redo" class="quiet" type="button" title="Повторить — Cmd/Ctrl+Shift+Z" aria-label="Повторить действие" disabled>↷</button>');
-  $('#save').insertAdjacentHTML('beforebegin', '<button id="bom-open" class="quiet" type="button">Спецификация <span id="bom-total">0</span></button>');
+  $('#save').insertAdjacentHTML('beforebegin', '<button id="undo" class="quiet" type="button" title="Отменить, Cmd/Ctrl+Z" aria-label="Отменить действие" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button id="redo" class="quiet" type="button" title="Повторить, Cmd/Ctrl+Shift+Z" aria-label="Повторить действие" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>');
+  $('#save').insertAdjacentHTML('beforebegin', '<button id="bom-open" class="quiet" type="button" title="Спецификация" aria-label="Спецификация"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span id="bom-total">0</span></button>');
   document.body.insertAdjacentHTML('beforeend', `<div id="bom-modal" class="bom-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="bom-title">
     <div class="bom-backdrop" data-bom-close></div>
     <div class="bom-dialog">
@@ -126,6 +126,20 @@ export function initializeInterface(onAdd, onRecolor) {
   });
 
   $('.catalog h1').textContent = 'Соберите свою систему.';
+  $('.catalog > .muted').insertAdjacentHTML('afterend', `<section class="route-panel menu-fold">
+    <button class="menu-fold-toggle" type="button" aria-expanded="true" aria-controls="route-panel-body"><span class="section-title">Автоподбор <span id="route-mode">линия</span></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <div id="route-panel-body" class="menu-fold-body">
+    <p class="muted small">Клик - прямой отрезок. Канализация соберется из труб и отводов каталога. Линия под углом врезает тройник, к гладкому концу того же диаметра труба садится своим раструбом.</p>
+    <div class="presets route-diameters"><button type="button" data-route-diameter="110" class="active">Ø110</button><button type="button" data-route-diameter="50">Ø50</button></div>
+    <button id="route-draw" type="button" aria-pressed="false">Рисовать линию</button>
+    <label class="field-label" for="route-height">Высота по горизонтали</label>
+    <div class="input-unit"><input id="route-height" type="number" step="10" value="100" aria-label="Высота горизонтального рисования, мм" /><span>мм</span></div>
+    <p class="muted small">На последней точке три оси: X красная, Y зеленая вверх, Z синяя. Ведите курсор вдоль оси, Shift фиксирует ее. Правая кнопка - обзор.</p>
+    <button id="route-build" class="primary" type="button" disabled>Построить канализацию</button>
+    <div class="route-actions"><button id="route-undo" class="text-button" type="button" disabled>Шаг назад</button><button id="route-clear" class="text-button" type="button" disabled>Сбросить линию</button></div>
+    <p id="route-meta" class="muted small">Кликните первую точку линии</p>
+    </div>
+  </section>`);
   $('.category .count').textContent = catalog.length;
   $('#add').outerHTML = `<div class="catalog-filters"><input id="catalog-search" type="search" placeholder="Найти элемент…" aria-label="Поиск по библиотеке" /><div class="presets"><button data-filter="all" class="active">Все · ${catalog.length}</button>${[110, 50].map((diameter) => `<button data-filter="${diameter}">Ø${diameter} · ${catalog.filter((item) => item.diameter === diameter).length}</button>`).join('')}</div></div><div id="catalog-list"></div>`;
   $('.catalog-filters').insertAdjacentHTML('beforeend', '<select id="catalog-kind" aria-label="Тип компонента"><option value="all">Все типы компонентов</option><option value="pipe">Трубы и патрубки</option><option value="elbow">Отводы</option><option value="tee">Тройники</option><option value="cross">Крестовины</option><option value="coupling">Муфты</option><option value="reducer">Переходы и редукции</option><option value="service">Сервисные элементы</option></select>');
@@ -195,5 +209,32 @@ export function initializeInterface(onAdd, onRecolor) {
     document.querySelectorAll('[data-filter]').forEach((other) => other.classList.toggle('active', other === button));
     renderCatalog();
   });
+  const library = document.createElement('section');
+  library.className = 'menu-fold';
+  const category = $('.category');
+  const footer = $('.library-footer');
+  category.parentElement.insertBefore(library, category);
+  const libraryToggle = document.createElement('button');
+  libraryToggle.type = 'button';
+  libraryToggle.className = 'category menu-fold-toggle';
+  libraryToggle.setAttribute('aria-expanded', 'true');
+  libraryToggle.setAttribute('aria-controls', 'library-body');
+  libraryToggle.innerHTML = `${category.innerHTML}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const libraryBody = document.createElement('div');
+  libraryBody.id = 'library-body';
+  libraryBody.className = 'menu-fold-body';
+  let node = category.nextElementSibling;
+  category.remove();
+  while (node && node !== footer) {
+    const next = node.nextElementSibling;
+    libraryBody.append(node);
+    node = next;
+  }
+  library.append(libraryToggle, libraryBody);
+  document.querySelectorAll('.menu-fold-toggle').forEach((button) => button.addEventListener('click', () => {
+    const fold = button.closest('.menu-fold');
+    const collapsed = fold.classList.toggle('collapsed');
+    button.setAttribute('aria-expanded', String(!collapsed));
+  }));
   renderCatalog();
 }
