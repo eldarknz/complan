@@ -1,33 +1,15 @@
 {
-  "name": "complan",
+  "name": "complan-workspace",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "build": "pnpm run typecheck && vite build",
-    "typecheck": "tsc --noEmit",
-    "preview": "vite preview --host 0.0.0.0",
-    "test": "tsx --test tests/*.test.js tests/*.test.ts",
-    "test:browser": "playwright test"
-  },
-  "dependencies": {
-    "mobx": "^6.16.1",
-    "mobx-react-lite": "^4.1.1",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "three": "^0.180.0",
-    "xlsx": "^0.18.5"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.64.1",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "@types/three": "^0.180.0",
-    "@vitejs/plugin-react": "^5.2.0",
-    "tsx": "^4.23.15",
-    "typescript": "~5.9.3",
-    "vite": "^7.1.7"
+    "dev": "pnpm --filter @complan/web dev",
+    "build": "pnpm --filter @complan/web build",
+    "typecheck": "pnpm --filter @complan/web typecheck",
+    "preview": "pnpm --filter @complan/web preview",
+    "test": "pnpm --filter @complan/web test",
+    "test:browser": "pnpm --filter @complan/web test:browser"
   }
 }

@@ -27,7 +27,7 @@ test('Поворот вокруг стыка вращает только выб�
   pipe.position.set(0, 100, 0); pipe.rotation.y = -Math.PI / 2;
   graph.join(pipe, 'out', tee, 'in'); graph.join(tee, 'branch', branch, 'in');
   const elements = [pipe, branch, tee];
-  await page.goto('/');
+  await page.goto('/?editor');
   await openProject(page, serializeProject(elements, graph));
   await expect(page.locator('#rotation-scope')).toHaveValue('joint');
   await expect(page.locator('#rotation-port')).toHaveValue('in');
@@ -79,7 +79,7 @@ test('Поворот вокруг стыка вращает только выб�
 test('Редактор рисует сцену, добавляет элементы и переключает виды', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/');
+  await page.goto('/?editor');
   await expect(page.locator('.catalog-item')).toHaveCount(catalog.length);
   await expect(page.locator('#object-count')).toHaveText('Элементов: 1');
   const canvas = page.locator('#viewport canvas');
@@ -130,7 +130,7 @@ test('Редактор рисует сцену, добавляет элемен�
 test('Выбор длины, автоматическое соединение, движение сборки и сохранение связей', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/');
+  await page.goto('/?editor');
   await page.locator('#catalog-kind').selectOption('pipe');
   await page.getByLabel('Длина Труба HTEM Ø110', { exact: true }).selectOption('750');
   await page.locator('[data-type-id="pipe-110"]').click();
@@ -161,7 +161,7 @@ test('Выбор длины, автоматическое соединение, 
 test('Перетаскивание манипулятором примагничивает свободные концы', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/');
+  await page.goto('/?editor');
   const entries = [0, 1300].map((x) => ({ typeId: 'pipe-110', length: 1000, position: [x, 100, 0], quaternion: [0, 0, 0, 1] }));
   await openProject(page, { version: 2, units: 'mm', elements: entries });
   await page.locator('[data-view="front"]').click();
@@ -216,7 +216,7 @@ test('Перетаскивание манипулятором примагнич
 test('Цвет новых и выбранных деталей сохраняется и отменяется', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/');
+  await page.goto('/?editor');
   await page.keyboard.press('Escape');
   await page.locator('#catalog-colors [data-color="orange"]').click();
   await expect(page.locator('#catalog-color-name')).toHaveText('Оранжевый');
@@ -247,7 +247,7 @@ test('Цвет новых и выбранных деталей сохраняе�
 test('Cmd/Ctrl+Z и Shift+Z отменяют связи и хранят последние 10 команд', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/');
+  await page.goto('/?editor');
   await expect(page.locator('#undo')).toBeDisabled();
   await page.locator('[data-type-id="pipe-110"]').click();
   const connected = await savedProject(page);

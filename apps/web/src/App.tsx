@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type PropsWithChildren } from 'react';
 import { observer } from 'mobx-react-lite';
-import { catalog } from './catalog.js';
-import { pipeColors, pipeColorById } from './elements.js';
-import { billOfMaterialsToAoa } from './project.js';
-import { initializeEditor } from './editor.js';
-import { editorStore as store } from './store.js';
+import { catalog } from './entities/catalog/model/catalog.js';
+import { pipeColors, pipeColorById } from './entities/element/model/elements.js';
+import { billOfMaterialsToAoa } from './entities/project/model/project.js';
+import { initializeEditor } from './widgets/editor/model/editor.js';
+import { editorStore as store } from './widgets/editor/model/store.js';
+import { Home } from './pages/home/ui/Home.js';
 
 function Icon({ path }: { path: string }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={path} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
@@ -143,7 +144,12 @@ function Inspector() {
   </aside>;
 }
 
-export function App() {
+function Editor() {
   useEffect(() => initializeEditor(), []);
   return <><Header /><aside className="catalog"><div className="eyebrow">БИБЛИОТЕКА ЭЛЕМЕНТОВ</div><h1>Соберите свою систему.</h1><p className="muted">Добавляйте элементы и собирайте коммуникации в пространстве.</p><RoutePanel /><Fold id="library-body" title={<>◉ <span>Канализация</span><span className="count">{catalog.length}</span></>}><Catalog /><div className="catalog-note"><span>↗</span><p>При включённом магните новая деталь пристыкуется к выбранному свободному концу. При перетаскивании подведите совместимые концы ближе 90 мм и отпустите мышь.</p></div></Fold><div className="library-footer"><span className="status-dot" /> Локальный проект · без регистрации</div></aside><Viewport /><Inspector /><BomModal /></>;
+}
+
+export function App() {
+  const params = new URLSearchParams(window.location.search);
+  return params.has('project') || params.has('editor') ? <Editor /> : <Home />;
 }

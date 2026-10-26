@@ -1,14 +1,15 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { catalog, catalogById } from './catalog.js';
-import { buildElement, getPorts, compatiblePorts, disposeElement, supportsPipeColor, pipeColorById, defaultPipeColor } from './elements.js';
-import { parseProject, parseConnections, serializeProject } from './project.js';
-import { initializeInterface, updateBillOfMaterials, getCatalogColor, syncColorSwatches } from './interface.js';
-import { Connections, elementPorts, findPort, poseOf, nearestConnection } from './connections.js';
-import { assembleRoute, findAttachment } from './route.js';
-import { CommandHistory } from './history.js';
-import { editorStore } from './store.js';
+import { catalog, catalogById } from './entities/catalog/model/catalog.js';
+import { buildElement, getPorts, compatiblePorts, disposeElement, supportsPipeColor, pipeColorById, defaultPipeColor } from './entities/element/model/elements.js';
+import { parseProject, parseConnections, serializeProject } from './entities/project/model/project.js';
+import { readProject, readProjects, writeProjects } from './entities/project/model/workspace.js';
+import { initializeInterface, updateBillOfMaterials, getCatalogColor, syncColorSwatches } from './features/editor/model/interface.js';
+import { Connections, elementPorts, findPort, poseOf, nearestConnection } from './entities/connection/model/connections.js';
+import { assembleRoute, findAttachment } from './features/route/model/route.js';
+import { CommandHistory } from './shared/lib/history/history.js';
+import { editorStore } from './widgets/editor/model/store.js';
 
 type Axis = 'x' | 'y' | 'z';
 interface RouteAxis { id: string; direction: THREE.Vector3; color: string }
@@ -1044,9 +1045,46 @@ renderer.domElement.addEventListener('pointermove', (event) => {
 });
 renderer.domElement.addEventListener('contextmenu', (event) => { if (routeActive) event.preventDefault(); });
 updateRouteUi();
-createElement();
+const projectId = new URLSearchParams(window.location.search).get('project');
+let canSaveWorkspace = false;
+if (projectId) {
+  try {
+    const project = readProject(projectId);
+    $('.project-name').textContent = project.name;
+    if (project.data) {
+      const entries = parseProject(project.data);
+      const edges = parseConnections(project.data, entries);
+      entries.forEach((entry) => createElement(entry.typeId, entry.length, new THREE.Vector3().fromArray(entry.position), new THREE.Quaternion().fromArray(entry.quaternion).normalize(), entry.color));
+      connections.edges = edges.map((edge) => ({ a: pipes[edge.a], ap: edge.ap, b: pipes[edge.b], bp: edge.bp }));
+      select(pipes.at(-1) || null);
+      updateCount(); focus();
+    } else createElement();
+    canSaveWorkspace = true;
+  } catch { toast('Не удалось открыть локальный проект. Вернитесь к списку проектов.'); }
+} else createElement();
+let lastSaved = '';
+function saveWorkspace() {
+  if (!projectId || !canSaveWorkspace) return;
+  try {
+    const data = serializeProject(pipes, connections);
+    const serialized = JSON.stringify(data);
+    if (serialized === lastSaved) return;
+    const projects = readProjects();
+    const project = projects.find((item) => item.id === projectId);
+    if (!project) return;
+    project.data = data;
+    project.updated = new Date().toISOString();
+    writeProjects(projects);
+    lastSaved = serialized;
+  } catch { toast('Не удалось сохранить проект в браузере. Скачайте его кнопкой сохранения.'); }
+}
+saveWorkspace();
+const workspaceTimer = window.setInterval(saveWorkspace, 1000);
+window.addEventListener('pagehide', saveWorkspace, { signal: lifetime.signal });
+$('.brand').addEventListener('click', saveWorkspace, { signal: lifetime.signal });
 renderer.setAnimationLoop(() => { orbit.update(); updateRouteLabels(); renderer.render(scene, camera); });
 return () => {
+  window.clearInterval(workspaceTimer);
   lifetime.abort();
   clearTimeout(toastTimer);
   resizeObserver.disconnect();

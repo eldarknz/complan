@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test('React StrictMode оставляет один редактор, MobX обновляет каталог и спецификацию', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/');
+  await page.goto('/?editor');
   await expect(page.locator('#viewport canvas')).toHaveCount(1);
   await expect(page.locator('#position-fields input')).toHaveCount(3);
   await expect(page.locator('#rotation-fields input')).toHaveCount(3);
