@@ -1,0 +1,163 @@
+openapi: 3.0.3
+info:
+  title: COMPLAN API
+  version: 0.1.0
+paths:
+  /api/v1/projects:
+    get:
+      summary: Получить список проектов
+      operationId: listProjects
+      parameters:
+        - $ref: '#/components/parameters/UserKey'
+      responses:
+        '200':
+          description: Список проектов
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ProjectSummary' }
+    post:
+      summary: Создать проект
+      operationId: createProject
+      parameters:
+        - $ref: '#/components/parameters/UserKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectRequest' }
+      responses:
+        '201':
+          description: Проект создан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectID' }
+  /api/v1/projects/{id}:
+    get:
+      summary: Получить проект
+      operationId: getProject
+      parameters:
+        - $ref: '#/components/parameters/UserKey'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Проект }
+        '404': { description: Проект не найден }
+    put:
+      summary: Сохранить проект
+      operationId: saveProject
+      parameters:
+        - $ref: '#/components/parameters/UserKey'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectRequest' }
+      responses:
+        '200': { description: Проект сохранён }
+        '404': { description: Проект не найден }
+    delete:
+      summary: Удалить проект
+      operationId: deleteProject
+      parameters:
+        - $ref: '#/components/parameters/UserKey'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Проект удалён }
+        '404': { description: Проект не найден }
+  /api/v1/projects/{id}/clear:
+    post:
+      summary: Очистить проект без удаления
+      operationId: clearProject
+      parameters:
+        - $ref: '#/components/parameters/UserKey'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Проект очищен }
+        '404': { description: Проект не найден }
+  /api/v1/catalog/sewerage:
+    get:
+      summary: Список компонентов канализации
+      operationId: listSewerageComponents
+      responses:
+        '200':
+          description: Компоненты из каталога PostgreSQL
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SewerageComponent'
+        '500':
+          description: Ошибка чтения каталога
+components:
+  parameters:
+    UserKey:
+      name: X-User-Key
+      in: header
+      required: false
+      schema: { type: string, default: anonymous }
+  schemas:
+    ProjectID:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, format: uuid }
+    ProjectSummary:
+      type: object
+      required: [id, name, updated]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        updated: { type: string, format: date-time }
+    ProjectRequest:
+      type: object
+      required: [document]
+      properties:
+        name: { type: string }
+        document:
+          type: object
+          required: [version, units, elements, connections]
+    Vector:
+      type: object
+      required: [x, y, z]
+      properties:
+        x: { type: number }
+        y: { type: number }
+        z: { type: number }
+    SeweragePort:
+      type: object
+      required: [code, name, diameter_mm, position, direction, socket, depth_mm]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        diameter_mm: { type: integer }
+        position: { $ref: '#/components/schemas/Vector' }
+        direction: { $ref: '#/components/schemas/Vector' }
+        socket: { type: boolean }
+        depth_mm: { type: number }
+    SewerageComponent:
+      type: object
+      required: [id, name, kind, description, diameter_mm, default_length_mm, accessory, plain, cuff, fixed, plastic, two_plane, eccentric, internal, lengths, ports]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        description: { type: string }
+        diameter_mm: { type: integer }
+        branch_diameter_mm: { type: integer, nullable: true }
+        outlet_diameter_mm: { type: integer, nullable: true }
+        angle_degrees: { type: number, nullable: true }
+        default_length_mm: { type: number }
+        accessory: { type: boolean }
+        plain: { type: boolean }
+        cuff: { type: boolean }
+        fixed: { type: boolean }
+        socket_depth_mm: { type: number, nullable: true }
+        plastic: { type: boolean }
+        two_plane: { type: boolean }
+        eccentric: { type: boolean }
+        internal: { type: boolean }
+        lengths: { type: array, items: { type: number } }
+        ports: { type: array, items: { $ref: '#/components/schemas/SeweragePort' } }

@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package complan.catalog.v1;
+
+option go_package = "github.com/eldarknz/complan/apps/api/gen/catalog/v1;catalogv1";
+
+message Vector { double x = 1; double y = 2; double z = 3; }
+message Port {
+  string code = 1;
+  string name = 2;
+  int32 diameter_mm = 3;
+  Vector position = 4;
+  Vector direction = 5;
+  bool socket = 6;
+  double depth_mm = 7;
+}
+message SewerageComponent {
+  string id = 1;
+  string name = 2;
+  string kind = 3;
+  string description = 4;
+  int32 diameter_mm = 5;
+  optional int32 branch_diameter_mm = 6;
+  optional int32 outlet_diameter_mm = 7;
+  optional double angle_degrees = 8;
+  double default_length_mm = 9;
+  bool accessory = 10;
+  bool plain = 11;
+  bool cuff = 12;
+  bool fixed = 13;
+  optional double socket_depth_mm = 14;
+  bool plastic = 15;
+  bool two_plane = 16;
+  bool eccentric = 17;
+  bool internal = 18;
+  repeated double lengths = 19;
+  repeated Port ports = 20;
+}
+message ListSewerageComponentsResponse { repeated SewerageComponent components = 1; }

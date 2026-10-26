@@ -98,7 +98,82 @@ pnpm run test:browser
 Команды backend:
 
 ```sh
+docker compose up -d postgres
 make api-run
+```
+
+В другом терминале проверьте API:
+
+```sh
+curl http://localhost:8080/health
+curl http://localhost:8080/health/db
+```
+
+Оба запроса должны вернуть `{"status":"ok"}`. Первый проверяет HTTP-сервер, второй — соединение с PostgreSQL.
+
+Остановить PostgreSQL можно командой:
+
+```sh
+docker compose down
+```
+
+Или используйте команды Makefile:
+
+```sh
+make db-up
+make api-run
+make db-down
+```
+
+По умолчанию API подключается к `postgres://complan:complan@localhost:5432/complan?sslmode=disable`. Для другого подключения задайте `COMPLAN_DATABASE_URL`.
+
+### Полная локальная проверка frontend + backend
+
+Для проверки загрузки каталога с backend используйте три терминала.
+
+**Терминал 1. PostgreSQL**
+
+```sh
+make db-up
+```
+
+**Терминал 2. Миграции, каталог и API**
+
+```sh
+make api-seed
+make api-run
+```
+
+`make api-seed` создаёт таблицы и загружает 73 компонента канализации. `make api-run` запускает API на `http://localhost:8080`.
+
+Проверить ручку напрямую можно так:
+
+```sh
+curl http://localhost:8080/api/v1/catalog/sewerage
+```
+
+**Терминал 3. Frontend**
+
+Создайте локальный файл конфигурации по шаблону:
+
+```sh
+cp apps/web/.env.example apps/web/.env.local
+```
+
+При необходимости измените `VITE_API_URL` в `apps/web/.env.local`.
+
+```sh
+pnpm run dev
+```
+
+Откройте адрес, который выведет Vite, обычно `http://localhost:5173/?editor`. При открытии редактора frontend запросит каталог из API. Список компонентов в панели «Канализация» должен загрузиться из PostgreSQL.
+
+Если API недоступен, frontend использует встроенный локальный каталог как резервный источник.
+
+После проверки остановите PostgreSQL:
+
+```sh
+make db-down
 ```
 
 Команды frontend из корня проекта:

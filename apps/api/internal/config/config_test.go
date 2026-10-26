@@ -18,3 +18,12 @@ func TestLoadUsesEnvironmentAddress(t *testing.T) {
 		t.Fatalf("expected address %q, got %q", address, got)
 	}
 }
+
+func TestLoadUsesEnvironmentDatabaseURL(t *testing.T) {
+	const databaseURL = "postgres://user:password@localhost:5432/database"
+	t.Setenv("COMPLAN_DATABASE_URL", databaseURL)
+
+	if got := Load().DatabaseURL; got != databaseURL {
+		t.Fatalf("expected database URL %q, got %q", databaseURL, got)
+	}
+}

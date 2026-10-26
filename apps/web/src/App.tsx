@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PropsWithChildren } from 'react';
 import { observer } from 'mobx-react-lite';
-import { catalog } from './entities/catalog/model/catalog.js';
+import { catalog, loadCatalogFromApi } from './entities/catalog/model/catalog.js';
 import { pipeColors, pipeColorById } from './entities/element/model/elements.js';
 import { billOfMaterialsToAoa } from './entities/project/model/project.js';
 import { initializeEditor } from './widgets/editor/model/editor.js';
@@ -103,12 +103,12 @@ const BomModal = observer(() => {
 });
 
 function Header() {
-  return <header><a className="brand" href="./"><span className="brand-icon">C</span>COMPLAN<span className="beta">LAB</span></a><div className="project-name">Канализационная система <span>/</span> Новый проект</div>
+  return <header><a className="brand" href="./"><span className="brand-icon">C</span>COMPLAN<span className="beta">LAB</span></a><div className="project-name">Канализационная система <span>/</span> Новый проект <button id="rename-project" className="project-rename" type="button" title="Переименовать проект" aria-label="Переименовать проект">✎</button></div>
     <button id="undo" className="quiet" type="button" title="Отменить, Cmd/Ctrl+Z" aria-label="Отменить действие" disabled><Icon path="M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H12" /></button>
     <button id="redo" className="quiet" type="button" title="Повторить, Cmd/Ctrl+Shift+Z" aria-label="Повторить действие" disabled><Icon path="M15 14l5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H12" /></button><BomButton />
     <button id="save" className="quiet" type="button" title="Сохранить проект" aria-label="Сохранить проект"><Icon path="M12 4v10M8 10l4 4 4-4M5 19h14" /></button>
     <button id="load" className="quiet" type="button" title="Открыть" aria-label="Открыть"><Icon path="M4 8h5l2 2h9v9H4z" /></button>
-    <button id="delete-all" className="quiet" type="button" title="Удалить все" aria-label="Удалить все"><Icon path="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13" /></button><input id="file" type="file" accept="application/json,.json" hidden />
+    <button id="delete-all" className="quiet" type="button" title="Очистить проект" aria-label="Очистить проект"><Icon path="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13" /></button><input id="file" type="file" accept="application/json,.json" hidden />
   </header>;
 }
 
@@ -145,7 +145,15 @@ function Inspector() {
 }
 
 function Editor() {
-  useEffect(() => initializeEditor(), []);
+  const [catalogState, setCatalogState] = useState<'loading' | 'ready' | 'error'>('loading');
+  useEffect(() => {
+    void loadCatalogFromApi(import.meta.env.VITE_API_URL)
+      .then(() => setCatalogState('ready'))
+      .catch(() => setCatalogState('error'));
+  }, []);
+  useEffect(() => catalogState === 'ready' ? initializeEditor() : undefined, [catalogState]);
+  if (catalogState === 'loading') return <main className="api-state">Загрузка каталога канализации…</main>;
+  if (catalogState === 'error') return <main className="api-state">Не удалось загрузить каталог. Запустите backend и обновите страницу.</main>;
   return <><Header /><aside className="catalog"><div className="eyebrow">БИБЛИОТЕКА ЭЛЕМЕНТОВ</div><h1>Соберите свою систему.</h1><p className="muted">Добавляйте элементы и собирайте коммуникации в пространстве.</p><RoutePanel /><Fold id="library-body" title={<>◉ <span>Канализация</span><span className="count">{catalog.length}</span></>}><Catalog /><div className="catalog-note"><span>↗</span><p>При включённом магните новая деталь пристыкуется к выбранному свободному концу. При перетаскивании подведите совместимые концы ближе 90 мм и отпустите мышь.</p></div></Fold><div className="library-footer"><span className="status-dot" /> Локальный проект · без регистрации</div></aside><Viewport /><Inspector /><BomModal /></>;
 }
 

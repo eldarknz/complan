@@ -4,7 +4,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { catalog, catalogById } from './entities/catalog/model/catalog.js';
 import { buildElement, getPorts, compatiblePorts, disposeElement, supportsPipeColor, pipeColorById, defaultPipeColor } from './entities/element/model/elements.js';
 import { parseProject, parseConnections, serializeProject } from './entities/project/model/project.js';
-import { readProject, readProjects, writeProjects } from './entities/project/model/workspace.js';
+import { clearRemoteProject, readProject, readProjects, readRemoteProject, saveRemoteProject, writeProjects } from './entities/project/model/workspace.js';
 import { initializeInterface, updateBillOfMaterials, getCatalogColor, syncColorSwatches } from './features/editor/model/interface.js';
 import { Connections, elementPorts, findPort, poseOf, nearestConnection } from './entities/connection/model/connections.js';
 import { assembleRoute, findAttachment } from './features/route/model/route.js';
@@ -518,8 +518,13 @@ function removePipe(pipe: THREE.Object3D) {
   pipes.splice(pipes.indexOf(pipe), 1);
 }
 $('#delete').onclick = () => { if (!selected) return; removePipe(selected); select(pipes.at(-1) || null); updateCount(); };
-$('#delete-all').onclick = () => {
+$('#delete-all').onclick = async () => {
   if (!pipes.length && !routePoints.length) return;
+  if (!window.confirm('Очистить проект? Все компоненты будут удалены, сам проект останется в списке.')) return;
+  if (projectId) {
+    try { await clearRemoteProject(projectId); }
+    catch { toast('Не удалось очистить проект на backend.'); return; }
+  }
   select(null);
   [...pipes].forEach(removePipe);
   routePoints = [];
@@ -527,7 +532,7 @@ $('#delete-all').onclick = () => {
   updateRouteUi();
   refreshRoutePreview();
   updateCount();
-  toast('Все элементы удалены');
+  toast('Проект очищен');
 };
 $('#reset-rotation').onclick = () => { if (selected && !jointRotationPort()) { selected.rotation.set(0, 0, 0); applyAssemblyMove(); updateFields(); updateOutline(); syncTransform(); } };
 function setMode(mode: 'translate' | 'rotate') {
@@ -598,18 +603,15 @@ renderer.domElement.addEventListener('pointerup', (event) => {
 });
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 function toast(message: string) {
-  $('#toast').textContent = message;
-  $('#toast').classList.add('visible');
+  const target = document.querySelector<HTMLElement>('#toast');
+  if (!target) return;
+  target.textContent = message;
+  target.classList.add('visible');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 2800);
+  toastTimer = setTimeout(() => target.classList.remove('visible'), 2800);
 }
 $('#save').onclick = () => {
-  const project = serializeProject(pipes, connections);
-  const url = URL.createObjectURL(new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }));
-  const link = document.createElement('a');
-  link.href = url; link.download = 'complan-project.json'; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast('Проект сохранён в JSON');
+  void saveWorkspace(true, true);
 };
 $('#load').onclick = () => $('#file').click();
 $('#file').onchange = async (event) => {
@@ -1050,7 +1052,7 @@ let canSaveWorkspace = false;
 if (projectId) {
   try {
     const project = readProject(projectId);
-    $('.project-name').textContent = project.name;
+    $('.project-name').childNodes[2].textContent = ` ${project.name} `;
     if (project.data) {
       const entries = parseProject(project.data);
       const edges = parseConnections(project.data, entries);
@@ -1059,29 +1061,62 @@ if (projectId) {
       select(pipes.at(-1) || null);
       updateCount(); focus();
     } else createElement();
-    canSaveWorkspace = true;
   } catch { toast('Не удалось открыть локальный проект. Вернитесь к списку проектов.'); }
 } else createElement();
+if (projectId) {
+  void readRemoteProject(projectId).then((remote) => {
+    if (lifetime.signal.aborted) return;
+    const entries = parseProject(remote.document);
+    const edges = parseConnections(remote.document, entries);
+    [...pipes].forEach(removePipe);
+    entries.forEach((entry) => createElement(entry.typeId, entry.length, new THREE.Vector3().fromArray(entry.position), new THREE.Quaternion().fromArray(entry.quaternion).normalize(), entry.color));
+    connections.edges = edges.map((edge) => ({ a: pipes[edge.a], ap: edge.ap, b: pipes[edge.b], bp: edge.bp }));
+    $('.project-name').childNodes[2].textContent = ` ${remote.name} `;
+    select(pipes.at(-1) || null); updateCount(); focus();
+    canSaveWorkspace = true;
+    lastSaved = JSON.stringify(serializeProject(pipes, connections));
+  }).catch(() => {
+    canSaveWorkspace = true;
+    toast('Не удалось загрузить проект с backend. Используется локальная копия.');
+  });
+} else {
+  canSaveWorkspace = true;
+}
 let lastSaved = '';
-function saveWorkspace() {
+const renameButton = document.querySelector<HTMLButtonElement>('#rename-project');
+if (renameButton) renameButton.onclick = () => {
+  if (!projectId) return;
+  const current = $('.project-name').textContent?.replace('Канализационная система / ', '').replace('✎', '').trim() || '';
+  const name = window.prompt('Название проекта', current)?.trim();
+  if (!name || name === current) return;
+  const projectName = $('.project-name');
+  projectName.childNodes[2].textContent = ` ${name} `;
+  const projects = readProjects();
+  const project = projects.find((item) => item.id === projectId);
+  if (project) { project.name = name; project.updated = new Date().toISOString(); writeProjects(projects); }
+  void saveRemoteProject(projectId, name, serializeProject(pipes, connections)).then(() => toast('Проект переименован')).catch(() => toast('Не удалось сохранить название проекта.'));
+};
+async function saveWorkspace(force = false, notify = false) {
   if (!projectId || !canSaveWorkspace) return;
   try {
     const data = serializeProject(pipes, connections);
     const serialized = JSON.stringify(data);
-    if (serialized === lastSaved) return;
+    if (!force && serialized === lastSaved) return;
     const projects = readProjects();
     const project = projects.find((item) => item.id === projectId);
     if (!project) return;
     project.data = data;
     project.updated = new Date().toISOString();
     writeProjects(projects);
+    await saveRemoteProject(projectId, project.name, data);
     lastSaved = serialized;
-  } catch { toast('Не удалось сохранить проект в браузере. Скачайте его кнопкой сохранения.'); }
+    if (notify) toast('Проект сохранён');
+  } catch { if (notify) toast('Не удалось сохранить проект в базе данных.'); }
 }
 saveWorkspace();
 const workspaceTimer = window.setInterval(saveWorkspace, 1000);
-window.addEventListener('pagehide', saveWorkspace, { signal: lifetime.signal });
-$('.brand').addEventListener('click', saveWorkspace, { signal: lifetime.signal });
+window.addEventListener('pagehide', () => saveWorkspace(), { signal: lifetime.signal });
+$('.brand').addEventListener('click', () => saveWorkspace(), { signal: lifetime.signal });
 renderer.setAnimationLoop(() => { orbit.update(); updateRouteLabels(); renderer.render(scene, camera); });
 return () => {
   window.clearInterval(workspaceTimer);

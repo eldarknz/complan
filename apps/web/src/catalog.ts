@@ -1,3 +1,5 @@
+import axios from 'axios';
+
 export interface CatalogItem {
   id: string;
   name: string;
@@ -86,3 +88,37 @@ for (const [diameter, outlet] of [[50, 40], [110, 50], [110, 75], [110, 90]]) {
   add(`reducer-inner-${diameter}-${outlet}`, `Переход HTRI внутренний Ø${diameter}/${outlet}`, 'reducer', diameter, { outlet, length: diameter === 50 ? 65 : 100, internal: true });
 }
 export const catalogById = new Map(catalog.map((item) => [item.id, item]));
+
+type ApiCatalogItem = {
+  id: string;
+  name: string;
+  kind: string;
+  description: string;
+  diameter_mm: number;
+  branch_diameter_mm?: number;
+  outlet_diameter_mm?: number;
+  angle_degrees?: number;
+  default_length_mm: number;
+  accessory: boolean;
+  plain: boolean;
+  cuff: boolean;
+  fixed: boolean;
+  socket_depth_mm?: number;
+  plastic: boolean;
+  two_plane: boolean;
+  eccentric: boolean;
+  internal: boolean;
+  lengths: number[];
+};
+
+export async function loadCatalogFromApi(baseUrl = 'http://localhost:8080'): Promise<void> {
+  const response = await axios.get<ApiCatalogItem[]>(`${baseUrl.replace(/\/$/, '')}/api/v1/catalog/sewerage`);
+  const items = response.data;
+  if (!Array.isArray(items) || !items.length) throw new Error('Catalog response is empty');
+  const loaded = items.map(({ diameter_mm: diameter, branch_diameter_mm: branch, outlet_diameter_mm: outlet, angle_degrees: angle, default_length_mm: length, accessory, plain, cuff, fixed, socket_depth_mm: socketDepth, plastic, two_plane: twoPlane, eccentric, internal, ...item }) => ({
+    ...item, diameter, length, branch, outlet, angle, accessory, plain, cuff, fixed, socketDepth, plastic, twoPlane, eccentric, internal,
+  }));
+  catalog.splice(0, catalog.length, ...loaded);
+  catalogById.clear();
+  for (const item of catalog) catalogById.set(item.id, item);
+}
